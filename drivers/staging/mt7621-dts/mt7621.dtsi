@@ -166,6 +166,44 @@
 			no-loopback-test;
 		};
 
+		uartlite2: uartlite@d00 {
+			compatible = "ns16550a";
+			reg = <0xd00 0x100>;
+
+			clock-frequency = <50000000>;
+
+			interrupt-parent = <&gic>;
+			interrupts = <GIC_SHARED 27 IRQ_TYPE_LEVEL_HIGH>;
+
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			no-loopback-test;
+
+			status = "disabled";
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart2_pins>;
+		};
+
+		uartlite3: uartlite@e00 {
+			compatible = "ns16550a";
+			reg = <0xe00 0x100>;
+
+			clock-frequency = <50000000>;
+
+			interrupt-parent = <&gic>;
+			interrupts = <GIC_SHARED 28 IRQ_TYPE_LEVEL_HIGH>;
+
+			reg-shift = <2>;
+			reg-io-width = <4>;
+			no-loopback-test;
+
+			status = "disabled";
+
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart3_pins>;
+		};
+
 		spi0: spi@b00 {
 			status = "disabled";
 
