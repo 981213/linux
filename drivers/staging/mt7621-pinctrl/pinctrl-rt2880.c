@@ -124,11 +124,13 @@ static int rt2880_pmx_group_enable(struct pinctrl_dev *pctrldev,
 	int shift;
 
 	/* dont allow double use */
+#if 0
 	if (p->groups[group].enabled) {
 		dev_err(p->dev, "%s is already enabled\n",
 			p->groups[group].name);
 		return -EBUSY;
 	}
+#endif
 
 	p->groups[group].enabled = 1;
 	p->func[func]->enabled = 1;
