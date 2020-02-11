@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0
 dtb-$(CONFIG_DTB_GNUBEE1)      += gbpc1.dtb
 dtb-$(CONFIG_DTB_GNUBEE2)      += gbpc2.dtb
-dtb-y      += PBR-M1.dtb ry3.dtb
+dtb-y      += PBR-M1.dtb ry3.dtb mt7621_d-team_newifi-d1.dtb
 
 obj-y				+= $(patsubst %.dtb, %.dtb.o, $(dtb-y))
