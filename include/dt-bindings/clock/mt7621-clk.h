@@ -1,14 +1,35 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/*
- * Copyright (C) 2018 Weijie Gao <hackpascal@gmail.com>
- */
 
 #ifndef __DT_BINDINGS_MT7621_CLK_H
 #define __DT_BINDINGS_MT7621_CLK_H
 
-#define MT7621_CLK_CPU		0
-#define MT7621_CLK_BUS		1
+#define MT7621_CLK_XTAL		0
 
-#define MT7621_CLK_MAX		2
+#define MT7621_CLK_CPU		1
+#define MT7621_CLK_DDR		2
+#define MT7621_CLK_BUS		3
+
+#define MT7621_CLK_HSDMA	4
+#define MT7621_CLK_FE		5
+#define MT7621_CLK_SPDIFTX	6
+#define MT7621_CLK_TIMER	7
+#define MT7621_CLK_PCM		8
+#define MT7621_CLK_PIO		9
+#define MT7621_CLK_GDMA		10
+#define MT7621_CLK_NAND		11
+#define MT7621_CLK_I2C		12
+#define MT7621_CLK_I2S		13
+#define MT7621_CLK_SPI		14
+#define MT7621_CLK_UART1	15
+#define MT7621_CLK_UART2	16
+#define MT7621_CLK_UART3	17
+#define MT7621_CLK_ETH		18
+#define MT7621_CLK_PCIE0	19
+#define MT7621_CLK_PCIE1	20
+#define MT7621_CLK_PCIE2	21
+#define MT7621_CLK_CRYPTO	22
+#define MT7621_CLK_SDXC		23
+
+#define MT7621_CLK_MAX		24
 
 #endif /* __DT_BINDINGS_MT7621_CLK_H */
