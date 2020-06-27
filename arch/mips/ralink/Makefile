@@ -21,7 +21,7 @@ obj-$(CONFIG_SOC_RT288X) += rt288x.o
 obj-$(CONFIG_SOC_RT305X) += rt305x.o
 obj-$(CONFIG_SOC_RT3883) += rt3883.o
 obj-$(CONFIG_SOC_MT7620) += mt7620.o
-obj-$(CONFIG_SOC_MT7621) += mt7621.o
+obj-$(CONFIG_SOC_MT7621) += mt7621.o clk-mt7621.o
 
 obj-$(CONFIG_EARLY_PRINTK) += early_printk.o
 
