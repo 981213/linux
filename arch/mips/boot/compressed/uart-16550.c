@@ -35,6 +35,12 @@
 #define IOTYPE unsigned int
 #endif
 
+#ifdef CONFIG_SOC_MT7621
+#define UART0_BASE  0x1e000c00
+#define PORT(offset) (CKSEG1ADDR(UART0_BASE) + (4 * offset))
+#define IOTYPE unsigned int
+#endif
+
 #ifndef IOTYPE
 #define IOTYPE char
 #endif
