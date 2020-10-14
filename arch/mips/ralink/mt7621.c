@@ -7,6 +7,7 @@
 
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/memblock.h>
 #include <linux/slab.h>
 #include <linux/sys_soc.h>
 
@@ -126,12 +127,10 @@ void __init mt7621_memory_detect(void)
 	if ((size == 256 * SZ_1M) &&
 	    (CPHYSADDR(dm + size) < MT7621_LOWMEM_MAX_SIZE) &&
 	    memcmp(dm, dm + size, sizeof(detect_magic))) {
-		add_memory_region(MT7621_LOWMEM_BASE, MT7621_LOWMEM_MAX_SIZE,
-				  BOOT_MEM_RAM);
-		add_memory_region(MT7621_HIGHMEM_BASE, MT7621_HIGHMEM_SIZE,
-				  BOOT_MEM_RAM);
+		memblock_add(MT7621_LOWMEM_BASE, MT7621_LOWMEM_MAX_SIZE);
+		memblock_add(MT7621_HIGHMEM_BASE, MT7621_HIGHMEM_SIZE);
 	} else {
-		add_memory_region(MT7621_LOWMEM_BASE, size, BOOT_MEM_RAM);
+		memblock_add(MT7621_LOWMEM_BASE, size);
 	}
 }
 
