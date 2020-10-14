@@ -31,9 +31,17 @@ SECTIONS
 		CONSTRUCTORS
 		. = ALIGN(16);
 	}
+
+#ifdef MIPS_ELF_APPENDED_DTB_VMLINUZ
+	.appended_dtb : {
+		*(.appended_dtb)
+		KEEP(*(.appended_dtb))
+	}
+#else
 	__appended_dtb = .;
 	/* leave space for appended DTB */
 	. += 0x100000;
+#endif
 
 	_edata = .;
 	/* End of data section */

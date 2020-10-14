@@ -3147,6 +3147,27 @@ choice
 		  if you don't intend to always append a DTB.
 endchoice
 
+config MIPS_ELF_APPENDED_DTB_VMLINUZ
+	bool "vmlinuz (ELF self-decompressing kernel) appended DTB support"
+	depends on MIPS_RAW_APPENDED_DTB && SYS_SUPPORTS_ZBOOT
+	help
+	  With this option, the vmlinuz (self-decompressing kernel ELF binary)
+	  boot code will look for a device tree binary (DTB|FDT) included in
+	  the vmlinux ELF section .appended_dtb. By default it is empty and
+	  the DTB can be appended using binutils command
+	  objcopy:
+
+	    objcopy --update-section .appended_dtb=<filename>.dtb vmlinuz
+
+	  This is meant as a backward compatibility convenience for those
+	  systems with a bootloader that can't be upgraded to accommodate
+	  the documented boot protocol using a device tree.
+
+	  vmlinuz uses the compressed vmlinux.bin, thus vmlinux must use
+	  MIPS_RAW_APPENDED_DTB to expect a DTB at the end of uncompressed
+	  kernel location. vmlinuz copies the DTB to this location after kernel
+	  decompression.
+
 choice
 	prompt "Kernel command line type" if !CMDLINE_OVERRIDE
 	default MIPS_CMDLINE_FROM_DTB if USE_OF && !ATH79 && !MACH_INGENIC && \

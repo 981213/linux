@@ -33,7 +33,11 @@ extern void puthex(unsigned long long val);
 #define puthex(val) do {} while (0)
 #endif
 
+#ifdef CONFIG_MIPS_ELF_APPENDED_DTB_VMLINUZ
+unsigned char __section(.appended_dtb) __appended_dtb[0x100000];
+#else
 extern char __appended_dtb[];
+#endif
 
 void error(char *x)
 {

@@ -62,6 +62,9 @@ extra-y += bswapsi.c
 $(obj)/bswapsi.c: $(obj)/%.c: $(srctree)/arch/mips/lib/%.c FORCE
 	$(call if_changed,shipped)
 
+extra-y += vmlinuz.lds
+CPPFLAGS_vmlinuz.lds := $(KBUILD_CFLAGS)
+
 targets := $(notdir $(vmlinuzobjs-y))
 
 targets += vmlinux.bin
@@ -106,7 +109,7 @@ quiet_cmd_zld = LD      $@
       cmd_zld = $(LD) $(KBUILD_LDFLAGS) -Ttext $(VMLINUZ_LOAD_ADDRESS) -T $< $(vmlinuzobjs-y) -o $@
 quiet_cmd_strip = STRIP	  $@
       cmd_strip = $(STRIP) -s $@
-vmlinuz: $(src)/ld.script $(vmlinuzobjs-y) $(obj)/calc_vmlinuz_load_addr
+vmlinuz: $(src)/vmlinuz.lds $(vmlinuzobjs-y) $(obj)/calc_vmlinuz_load_addr
 	$(call cmd,zld)
 	$(call cmd,strip)
 
