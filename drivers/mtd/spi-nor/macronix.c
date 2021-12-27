@@ -115,6 +115,7 @@ static int macronix_nor_late_init(struct spi_nor *nor)
 {
 	if (!nor->params->set_4byte_addr_mode)
 		nor->params->set_4byte_addr_mode = spi_nor_set_4byte_addr_mode_en4b_ex4b;
+	nor->flags &= ~SNOR_F_HAS_16BIT_SR;
 	nor->flags |= SNOR_F_HAS_LOCK;
 
 	return 0;
