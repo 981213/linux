@@ -806,7 +806,8 @@ static int rtl822x_config_aneg(struct phy_device *phydev)
 
 		ret = phy_modify_paged_changed(phydev, 0xa5d, 0x12,
 					       MDIO_AN_10GBT_CTRL_ADV2_5G |
-					       MDIO_AN_10GBT_CTRL_ADV5G,
+					       MDIO_AN_10GBT_CTRL_ADV5G |
+					       MDIO_AN_10GBT_CTRL_ADV10G,
 					       adv);
 		if (ret < 0)
 			return ret;
