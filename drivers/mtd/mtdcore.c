@@ -548,6 +548,29 @@ static int mtd_nvmem_add(struct mtd_info *mtd)
 	struct device_node *node = mtd_get_of_node(mtd);
 	struct nvmem_config config = {};
 
+	/*
+	 * Do NOT register NVMEM device for any partition that is meant to be
+	 * handled by a U-Boot env driver. That would result in associating two
+	 * different NVMEM devices with the same OF node.
+	 *
+	 * An example of unwanted behaviour of above (forwardtrace):
+	 * of_get_mac_addr_nvmem()
+	 * of_nvmem_cell_get()
+	 * __nvmem_device_get()
+	 *
+	 * We can't have __nvmem_device_get() return "mtdX" NVMEM device instead
+	 * of U-Boot env NVMEM device. That would result in failing to find
+	 * NVMEM cell.
+	 *
+	 * This issue seems to affect U-Boot env case only and will go away with
+	 * switch to NVMEM layouts.
+	 */
+	if (of_device_is_compatible(node, "u-boot,env") ||
+	    of_device_is_compatible(node, "u-boot,env-redundant-bool") ||
+	    of_device_is_compatible(node, "u-boot,env-redundant-count") ||
+	    of_device_is_compatible(node, "brcm,env"))
+		return 0;
+
 	config.id = NVMEM_DEVID_NONE;
 	config.dev = &mtd->dev;
 	config.name = dev_name(&mtd->dev);
