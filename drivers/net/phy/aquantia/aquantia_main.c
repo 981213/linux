@@ -473,6 +473,30 @@ static void aqr107_chip_info(struct phy_device *phydev)
 		   fw_major, fw_minor, build_id, prov_id);
 }
 
+static int aqr107_wait_processor_intensive_op(struct phy_device *phydev)
+{
+	int val, err;
+
+	/* The datasheet notes to wait at least 1ms after issuing a
+	 * processor intensive operation before checking.
+	 * We cannot use the 'sleep_before_read' parameter of read_poll_timeout
+	 * because that just determines the maximum time slept, not the minimum.
+	 */
+	usleep_range(1000, 5000);
+
+	err = phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND1,
+					VEND1_GLOBAL_GEN_STAT2, val,
+					!(val & VEND1_GLOBAL_GEN_STAT2_OP_IN_PROG),
+					AQR107_OP_IN_PROG_SLEEP,
+					AQR107_OP_IN_PROG_TIMEOUT, false);
+	if (err) {
+		phydev_err(phydev, "timeout: processor-intensive MDIO operation\n");
+		return err;
+	}
+
+	return 0;
+}
+
 static int aqr107_config_init(struct phy_device *phydev)
 {
 	struct aqr107_priv *priv = phydev->priv;
@@ -497,6 +521,15 @@ static int aqr107_config_init(struct phy_device *phydev)
 	ret = aqr107_wait_reset_complete(phydev);
 	if (!ret)
 		aqr107_chip_info(phydev);
+
+	ret = phy_clear_bits_mmd(phydev, MDIO_MMD_PMAPMD, MDIO_PMA_TXDIS,
+				 MDIO_PMD_TXDIS_GLOBAL);
+	if (ret)
+		return ret;
+
+	ret = aqr107_wait_processor_intensive_op(phydev);
+	if (ret)
+		return ret;
 
 	ret = aqr107_set_downshift(phydev, MDIO_AN_VEND_PROV_DOWNSHIFT_DFLT);
 	if (ret)
@@ -578,30 +611,6 @@ static void aqr107_link_change_notify(struct phy_device *phydev)
 	mode = FIELD_GET(VEND1_GLOBAL_RSVD_STAT9_MODE, val);
 	if (mode == VEND1_GLOBAL_RSVD_STAT9_1000BT2)
 		phydev_info(phydev, "Aquantia 1000Base-T2 mode active\n");
-}
-
-static int aqr107_wait_processor_intensive_op(struct phy_device *phydev)
-{
-	int val, err;
-
-	/* The datasheet notes to wait at least 1ms after issuing a
-	 * processor intensive operation before checking.
-	 * We cannot use the 'sleep_before_read' parameter of read_poll_timeout
-	 * because that just determines the maximum time slept, not the minimum.
-	 */
-	usleep_range(1000, 5000);
-
-	err = phy_read_mmd_poll_timeout(phydev, MDIO_MMD_VEND1,
-					VEND1_GLOBAL_GEN_STAT2, val,
-					!(val & VEND1_GLOBAL_GEN_STAT2_OP_IN_PROG),
-					AQR107_OP_IN_PROG_SLEEP,
-					AQR107_OP_IN_PROG_TIMEOUT, false);
-	if (err) {
-		phydev_err(phydev, "timeout: processor-intensive MDIO operation\n");
-		return err;
-	}
-
-	return 0;
 }
 
 static int aqr107_get_rate_matching(struct phy_device *phydev,
