@@ -10,8 +10,12 @@
 #define __SANE_USERSPACE_TYPES__	/* For PPC64, to get LL64 types */
 #endif
 
+#ifndef __linux__
+#include <tools/linux_types.h>
+#else
 #include <asm/types.h>
 #include <asm/posix_types.h>
+#endif
 
 struct page;
 struct kmem_cache;
@@ -56,6 +60,7 @@ typedef __s8  s8;
 #define __user
 #endif
 #define __must_check
+#undef __cold
 #define __cold
 
 typedef __u16 __bitwise __le16;

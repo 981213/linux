@@ -7,11 +7,11 @@
 #include <string.h>
 
 #include <linux/objtool_types.h>
-#include <asm/orc_types.h>
 
 #include <objtool/check.h>
 #include <objtool/warn.h>
 #include <objtool/endianness.h>
+#include <asm/orc_types.h>
 
 static int init_orc_entry(struct orc_entry *orc, struct cfi_state *cfi,
 			  struct instruction *insn)
