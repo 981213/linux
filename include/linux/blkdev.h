@@ -1564,4 +1564,15 @@ struct io_comp_batch {
 
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }
 
+
+#define BLK_DEVICE_ADD		1
+#define BLK_DEVICE_REMOVE	2
+#if defined(CONFIG_BLOCK_NOTIFIERS)
+void blk_register_notify(struct notifier_block *nb);
+void blk_unregister_notify(struct notifier_block *nb);
+#else
+static inline void blk_register_notify(struct notifier_block *nb) { };
+static inline void blk_unregister_notify(struct notifier_block *nb) { };
+#endif
+
 #endif /* _LINUX_BLKDEV_H */
