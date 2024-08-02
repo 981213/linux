@@ -1,0 +1,2 @@
+obj-$(CONFIG_CLK_SF19A2890) += clk-sf19a2890.o
+obj-$(CONFIG_CLK_SF19A2890_APBGATE) += clk-sf19a2890-apbgate.o

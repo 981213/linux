@@ -1,0 +1,205 @@
+#include <dt-bindings/clock/siflower,sf19a2890-clk.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/interrupt-controller/mips-gic.h>
+
+/ {
+	compatible = "siflower,sf19a2890";
+	#address-cells = <1>;
+	#size-cells = <1>;
+
+
+	aliases {
+		serial0 = &uart0;
+		serial1 = &uart1;
+		serial2 = &uart2;
+	};
+
+	chosen {
+		bootargs = "earlycon=pl011,mmio32,0x18300000 clk_ignore_unused";
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "mti,interaptiv";
+			reg = <0>;
+			clocks = <&clk CLK_MUXDIV_CPU>;
+			clock-names = "cpu";
+			clock-latency = <0>;
+		};
+
+		cpu@1 {
+			device_type = "cpu";
+			compatible = "mti,interaptiv";
+			reg = <1>;
+			clocks = <&clk CLK_MUXDIV_CPU>;
+			clock-names = "cpu";
+			clock-latency = <0>;
+		};
+		cpu@2 {
+			device_type = "cpu";
+			compatible = "mti,interaptiv";
+			reg = <2>;
+			clocks = <&clk CLK_MUXDIV_CPU>;
+			clock-names = "cpu";
+			clock-latency = <0>;
+		};
+		cpu@3 {
+			device_type = "cpu";
+			compatible = "mti,interaptiv";
+			reg = <3>;
+			clocks = <&clk CLK_MUXDIV_CPU>;
+			clock-names = "cpu";
+			clock-latency = <0>;
+		};
+	};
+
+	osc12m: oscillator-12m {
+		compatible = "fixed-clock";
+		clock-frequency = <12000000>;
+		#clock-cells = <0>;
+		clock-output-names = "osc12m";
+	};
+
+	osc40m: oscillator-40m {
+		compatible = "fixed-clock";
+		clock-frequency = <40000000>;
+		#clock-cells = <0>;
+		clock-output-names = "osc40m";
+	};
+
+	soc {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "simple-bus";
+		ranges;
+		interrupt-parent = <&gic>;
+		
+		spi: spi@18202000 {
+			compatible = "arm,pl022", "arm,primecell";
+			reg = <0x18202000 0x1000>;
+			clocks = <&spiclk 5>, <&spiclk 4>;
+			clock-names = "sspclk", "apb_pclk";
+			interrupts = <GIC_SHARED 225 IRQ_TYPE_LEVEL_HIGH>;
+
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "disabled";
+		};
+
+		// missing dma & pinctrl
+		uart0: serial@18300000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x18300000 0x1000>;
+			interrupts = <GIC_SHARED 226 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&clk CLK_MUXDIV_UART>, <&uartclk 0>;
+			clock-names = "uartclk", "apb_pclk";
+			status = "disabled";
+		};
+
+		uart1: serial@18301000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x18301000 0x1000>;
+			interrupts = <GIC_SHARED 227 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&uartclk 5>, <&uartclk 1>;
+			clock-names = "uartclk", "apb_pclk";
+			status = "disabled";
+		};
+
+		uart2: serial@18302000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x18302000 0x1000>;
+			interrupts = <GIC_SHARED 228 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&uartclk 6>, <&uartclk 2>;
+			clock-names = "uartclk", "apb_pclk";
+			status = "disabled";
+		};
+
+		clk: clock-controller@19e01000 {
+			compatible = "siflower,sf19a2890-clk";
+			reg = <0x19e01000 0x800>;
+			clocks = <&osc12m>, <&osc40m>;
+			clock-names = "osc12m", "osc40m";
+			#clock-cells = <1>;
+		};
+
+		i2cclk: clock-controller@19e24404 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e24404 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "i2c0", "i2c1", "i2c2";
+			#clock-cells = <1>;
+		};
+
+		spiclk: clock-controller@19e24804 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e24804 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>,
+				 <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "spi0_apb", "spi0_ssp", "spi1_apb",
+					     "spi1_ssp", "spi2_apb", "spi2_ssp";
+			#clock-cells = <1>;
+		};
+
+		uartclk: clock-controller@19e24c04 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e24c04 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>,
+				 <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>;
+			clock-output-names = "uart0_apb", "uart1_apb", "uart2_apb", "uart3_apb",
+					     "uart0", "uart1","uart2","uart3";
+			#clock-cells = <1>;
+		};
+
+		pwmclk: clock-controller@19e25404 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e25404 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "pwm";
+			#clock-cells = <1>;
+		};
+
+		timerclk: clock-controller@19e25804 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e25804 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "timer";
+			#clock-cells = <1>;
+		};
+
+		wdtclk: clock-controller@19e25c04 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e25c04 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "wdt";
+			#clock-cells = <1>;
+		};
+
+		gpioclk: clock-controller@19e2b404 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e2b404 0x4>;
+			clocks = <&clk CLK_MUXDIV_PBUS>;
+			clock-output-names = "gpio";
+			#clock-cells = <1>;
+		};
+		
+		gic: interrupt-controller@1bdc0000 {
+			compatible = "mti,gic";
+			reg = <0x1bdc0000 0x20000>;
+			interrupt-controller;
+			#interrupt-cells = <3>;
+			mti,reserved-ipi-vectors = <0 8>;
+
+			timer {
+				compatible = "mti,gic-timer";
+				interrupts = <GIC_LOCAL 1 IRQ_TYPE_NONE>;
+				clocks = <&clk CLK_MUXDIV_CPU>;
+			};
+		};
+
+
+	};
+};

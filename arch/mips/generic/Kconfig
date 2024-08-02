@@ -114,6 +114,12 @@ config BOARD_INGENIC
 	help
 	  Enable support for boards based on Ingenic SoCs.
 
+config BOARD_SIFLOWER_MIPS
+	bool "Support boards based on Siflower MIPS SoCs"
+	select ARM_AMBA
+	help
+	  Enable support for boards based on Siflower MIPS SoCs.
+
 config VIRT_BOARD_RANCHU
 	bool "Support Ranchu platform for Android emulator"
 	help
