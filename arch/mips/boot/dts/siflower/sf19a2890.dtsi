@@ -128,7 +128,7 @@
 
 		i2cclk: clock-controller@19e24404 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e24404 0x4>;
+			reg = <0x19e24404 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "i2c0", "i2c1", "i2c2";
 			#clock-cells = <1>;
@@ -136,7 +136,7 @@
 
 		spiclk: clock-controller@19e24804 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e24804 0x4>;
+			reg = <0x19e24804 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>,
 				 <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "spi0_apb", "spi0_ssp", "spi1_apb",
@@ -146,7 +146,7 @@
 
 		uartclk: clock-controller@19e24c04 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e24c04 0x4>;
+			reg = <0x19e24c04 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>, <&clk CLK_MUXDIV_PBUS>,
 				 <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>, <&clk CLK_MUXDIV_UART>;
 			clock-output-names = "uart0_apb", "uart1_apb", "uart2_apb", "uart3_apb",
@@ -156,7 +156,7 @@
 
 		pwmclk: clock-controller@19e25404 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e25404 0x4>;
+			reg = <0x19e25404 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "pwm";
 			#clock-cells = <1>;
@@ -164,7 +164,7 @@
 
 		timerclk: clock-controller@19e25804 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e25804 0x4>;
+			reg = <0x19e25804 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "timer";
 			#clock-cells = <1>;
@@ -172,7 +172,7 @@
 
 		wdtclk: clock-controller@19e25c04 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e25c04 0x4>;
+			reg = <0x19e25c04 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "wdt";
 			#clock-cells = <1>;
@@ -180,7 +180,7 @@
 
 		gpioclk: clock-controller@19e2b404 {
 			compatible = "siflower,sf19a2890-apbgate";
-			reg = <0x19e2b404 0x4>;
+			reg = <0x19e2b404 0xc>;
 			clocks = <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "gpio";
 			#clock-cells = <1>;

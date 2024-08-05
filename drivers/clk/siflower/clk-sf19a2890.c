@@ -1,4 +1,3 @@
-#include "linux/printk.h"
 #include <linux/kernel.h>
 #include <linux/of_address.h>
 #include <linux/slab.h>
@@ -290,10 +289,7 @@ static void sf19a28_muxdiv_disable(struct clk_hw *hw)
 {
 	struct sf_clk_common *cmn_priv = hw_to_sf_clk_common(hw);
 	struct sf19a2890_clk *priv = cmn_to_clk(cmn_priv);
-	pr_info("NOP: clk %lx disabled.\n", priv->offset);
-	dump_stack();
-	//BUG();
-	//sf_writel(cmn_priv, priv->offset + REG_MUXDIV_EN, 0);
+	sf_writel(cmn_priv, priv->offset + REG_MUXDIV_EN, 0);
 }
 
 static int sf19a28_muxdiv_is_enabled(struct clk_hw *hw)
