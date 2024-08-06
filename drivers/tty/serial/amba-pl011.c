@@ -2326,8 +2326,6 @@ pl011_console_write(struct console *co, const char *s, unsigned int count)
 	unsigned long flags;
 	int locked = 1;
 
-	clk_enable(uap->clk);
-
 	local_irq_save(flags);
 	if (uap->port.sysrq)
 		locked = 0;
@@ -2362,8 +2360,6 @@ pl011_console_write(struct console *co, const char *s, unsigned int count)
 	if (locked)
 		spin_unlock(&uap->port.lock);
 	local_irq_restore(flags);
-
-	clk_disable(uap->clk);
 }
 
 static void pl011_console_get_options(struct uart_amba_port *uap, int *baud,
