@@ -138,6 +138,14 @@
 			status = "disabled";
 		};
 
+		watchdog: watchdog@18700000 {
+			compatible = "snps,dw-wdt";
+			reg = <0x18700000 0x1000>;
+			interrupts = <GIC_SHARED 238 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&wdtclk 0>;
+			resets = <&wdtrst 0>;
+		};
+
 		gpio: gpio@19d00000 {
 			compatible = "siflower,sf19a2890-gpio";
 			reg=<0x19d00000 0x100000>;
