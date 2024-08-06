@@ -62,6 +62,7 @@ static struct addr_range percpu_range = {
 static struct sym_entry **table;
 static unsigned int table_size, table_cnt;
 static int all_symbols;
+static int uncompressed;
 static int absolute_percpu;
 static int base_relative;
 static int lto_clang;
@@ -453,13 +454,15 @@ static void write_src(void)
 	}
 	printf("\n");
 
-	/*
-	 * Now that we wrote out the compressed symbol names, restore the
-	 * original names, which are needed in some of the later steps.
-	 */
-	for (i = 0; i < table_cnt; i++) {
-		expand_symbol(table[i]->sym, table[i]->len, buf);
-		strcpy((char *)table[i]->sym, buf);
+	if (!uncompressed) {
+		/*
+		 * Now that we wrote out the compressed symbol names, restore the
+		 * original names, which are needed in some of the later steps.
+		 */
+		for (i = 0; i < table_cnt; i++) {
+			expand_symbol(table[i]->sym, table[i]->len, buf);
+			strcpy((char *)table[i]->sym, buf);
+		}
 	}
 
 	output_label("kallsyms_markers");
@@ -469,20 +472,22 @@ static void write_src(void)
 
 	free(markers);
 
-	output_label("kallsyms_token_table");
-	off = 0;
-	for (i = 0; i < 256; i++) {
-		best_idx[i] = off;
-		expand_symbol(best_table[i], best_table_len[i], buf);
-		printf("\t.asciz\t\"%s\"\n", buf);
-		off += strlen(buf) + 1;
-	}
-	printf("\n");
+	if (!uncompressed) {
+		output_label("kallsyms_token_table");
+		off = 0;
+		for (i = 0; i < 256; i++) {
+			best_idx[i] = off;
+			expand_symbol(best_table[i], best_table_len[i], buf);
+			printf("\t.asciz\t\"%s\"\n", buf);
+			off += strlen(buf) + 1;
+		}
+		printf("\n");
 
-	output_label("kallsyms_token_index");
-	for (i = 0; i < 256; i++)
-		printf("\t.short\t%d\n", best_idx[i]);
-	printf("\n");
+		output_label("kallsyms_token_index");
+		for (i = 0; i < 256; i++)
+			printf("\t.short\t%d\n", best_idx[i]);
+		printf("\n");
+	}
 
 	if (!base_relative)
 		output_label("kallsyms_addresses");
@@ -582,6 +587,9 @@ static unsigned char *find_token(unsigned char *str, int len,
 {
 	int i;
 
+	if (uncompressed)
+		return NULL;
+
 	for (i = 0; i < len - 1; i++) {
 		if (str[i] == token[0] && str[i+1] == token[1])
 			return &str[i];
@@ -653,6 +661,9 @@ static int find_best_token(void)
 static void optimize_result(void)
 {
 	int i, best;
+
+	if (uncompressed)
+		return;
 
 	/* using the '\0' symbol last allows compress_symbols to use standard
 	 * fast string functions */
@@ -815,6 +826,7 @@ int main(int argc, char **argv)
 			{"absolute-percpu", no_argument, &absolute_percpu, 1},
 			{"base-relative",   no_argument, &base_relative,   1},
 			{"lto-clang",       no_argument, &lto_clang,       1},
+			{"uncompressed",   no_argument, &uncompressed,   1},
 			{},
 		};
 
