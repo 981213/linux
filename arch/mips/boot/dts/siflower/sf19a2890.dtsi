@@ -79,6 +79,17 @@
 		ranges;
 		interrupt-parent = <&gic>;
 
+		gmac: ethernet@10800000 {
+			compatible = "siflower,sf19a2890-gmac", "snps,dwmac";
+			reg = <0x18140000 0x4000>;
+			interrupts = <GIC_SHARED 32 IRQ_TYPE_LEVEL_HIGH>,
+					<GIC_SHARED 34 IRQ_TYPE_LEVEL_HIGH>,
+					<GIC_SHARED 33 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq", "eth_wake_irq", "eth_lpi";
+			clocks = <&gmacclk 0>, <&gmacclk 1>, <&gmacclk 3>, <&gmacclk 2>;
+			clock-names = "stmmaceth", "pclk", "ptp_ref", "gmac_byp_ref";
+			status = "disabled";
+		};
 		// gdma: dma@11800000 {
 		// 	compatible = "arm,pl330", "arm,primecell";
 		// 	reg = <0x11800000 0x1000>;
@@ -180,6 +191,21 @@
 				offset = <0x30>;
 				value = <0x1>;
 			};
+		};
+
+		gmacrst: reset-controller@19e04400 {
+			compatible = "siflower,sf19a2890-periph-reset";
+			reg = <0x19e04400 0x4>;
+			#reset-cells = <0>;
+			siflower,reset-masks = <0x7>;
+		};
+
+		gmacclk: clock-controller@19e04404 {
+			compatible = "siflower,sf19a2890-apbgate";
+			reg = <0x19e04404 0xc>;
+			clocks = <&clk CLK_MUXDIV_BUS1>, <&clk CLK_MUXDIV_CPU>, <&clk CLK_MUXDIV_GMAC_BYP_REF>, <&clk CLK_MUXDIV_ETH_TSU>;
+			clock-output-names = "gmac", "gmac_pclk", "gmac_byp_ref", "ethtsu";
+			#clock-cells = <1>;
 		};
 
 		dmarst: reset-controller@19e08400 {
