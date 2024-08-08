@@ -81,13 +81,16 @@
 
 		gmac: ethernet@10800000 {
 			compatible = "siflower,sf19a2890-gmac", "snps,dwmac";
-			reg = <0x18140000 0x4000>;
+			reg = <0x10800000 0x200000>,
+				<0x19e04440 0x10>;
 			interrupts = <GIC_SHARED 32 IRQ_TYPE_LEVEL_HIGH>,
 					<GIC_SHARED 34 IRQ_TYPE_LEVEL_HIGH>,
 					<GIC_SHARED 33 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "macirq", "eth_wake_irq", "eth_lpi";
 			clocks = <&gmacclk 0>, <&gmacclk 1>, <&gmacclk 3>, <&gmacclk 2>;
 			clock-names = "stmmaceth", "pclk", "ptp_ref", "gmac_byp_ref";
+			resets = <&gmacrst 0>;
+			reset-names = "stmmaceth";
 			status = "disabled";
 		};
 		// gdma: dma@11800000 {
@@ -196,7 +199,7 @@
 		gmacrst: reset-controller@19e04400 {
 			compatible = "siflower,sf19a2890-periph-reset";
 			reg = <0x19e04400 0x4>;
-			#reset-cells = <0>;
+			#reset-cells = <1>;
 			siflower,reset-masks = <0x7>;
 		};
 

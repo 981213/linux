@@ -30,6 +30,8 @@
 &gmac {
 	status = "okay";
 	phy-mode = "rgmii";
+	nvmem-cells = <&rgmii_delay_factory_b2>;
+	nvmem-cell-names = "rgmii-delay";
 	fixed-link {
 		speed = <1000>;
 		full-duplex;
@@ -70,6 +72,16 @@
 		factory:partition@90000 {
 			label = "factory";
 			reg = <0x90000 0x10000>; /* 64k */
+
+			nvmem-layout {
+				compatible = "fixed-layout";
+				#address-cells = <1>;
+				#size-cells = <1>;
+
+				rgmii_delay_factory_b2: rgmii-delay@b2 {
+					reg = <0xb2 0x4>;
+				};
+			};
 		};
 
 		partition@a0000 {

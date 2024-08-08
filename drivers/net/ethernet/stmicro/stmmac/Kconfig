@@ -142,6 +142,15 @@ config DWMAC_ROCKCHIP
 	  This selects the Rockchip RK3288 SoC glue layer support for
 	  the stmmac device driver.
 
+config DWMAC_SF19A2890
+	tristate "Siflower SF19A2890 GMAC support"
+	default BOARD_SIFLOWER_MIPS
+	help
+	  Support for GMAC on Siflower SF19A2890 SoC.
+
+	  This selects the Siflower SF19A2890 SoC glue layer support for
+	  the stmmac device driver.
+
 config DWMAC_SOCFPGA
 	tristate "SOCFPGA dwmac support"
 	default ARCH_INTEL_SOCFPGA
