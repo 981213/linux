@@ -36,7 +36,6 @@ static int reset_sf19a28_periph_update(struct reset_controller_dev *rcdev,
 		reg &= ~data->reset_masks[id];
 	writel(reg, data->base);
 	spin_unlock_irqrestore(&data->lock, flags);
-
 	return 0;
 }
 
@@ -79,6 +78,7 @@ static int reset_sf19a28_periph_probe(struct platform_device *pdev)
 	struct reset_sf19a28_periph_data *data;
 	void __iomem *base;
 	int nr_resets;
+	int ret;
 
 	nr_resets = of_property_count_u32_elems(node, "siflower,reset-masks");
 
@@ -89,6 +89,12 @@ static int reset_sf19a28_periph_probe(struct platform_device *pdev)
 	data = devm_kzalloc(dev, struct_size(data, reset_masks, nr_resets), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
+
+	ret = of_property_read_u32_array(node, "siflower,reset-masks", data->reset_masks, nr_resets);
+	if (ret) {
+		dev_err(dev, "failed to read reset masks: %d\n", ret);
+		return ret;
+	}
 
 	base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(base))
