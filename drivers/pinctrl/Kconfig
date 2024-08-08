@@ -417,6 +417,16 @@ config PINCTRL_ROCKCHIP
 	help
           This support pinctrl and GPIO driver for Rockchip SoCs.
 
+config PINCTRL_SF19A2890
+	tristate "Siflower SF19A2890 pinctrl driver"
+	depends on OF && (BOARD_SIFLOWER_MIPS || COMPILE_TEST)
+	select PINMUX
+	select PINCONF
+	select GENERIC_PINCONF
+	default BOARD_SIFLOWER_MIPS
+	help
+	   Say Y here to enable the Siflower SF19A2890 pinctrl driver.
+
 config PINCTRL_SINGLE
 	tristate "One-register-per-pin type device tree based pinctrl driver"
 	depends on OF
