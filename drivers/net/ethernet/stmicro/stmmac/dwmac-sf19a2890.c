@@ -7,7 +7,7 @@
  * Copyright (C) 2024 Chuanhong Guo <gch981213@gmail.com>
  */
 
-#include "linux/gfp_types.h"
+#include <linux/of_net.h>
 #include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -25,6 +25,9 @@ struct sf19a2890_gmac_priv {
 
 #define REG_MISC		0x0
 #define  MISC_PHY_INTF_SEL	GENMASK(2, 0)
+#define   PHY_IF_GMII_MII	0
+#define   PHY_IF_RGMII		1
+#define   PHY_IF_RMII		4
 #define  MISC_PTP_AUX_TS_TRIG	BIT(3)
 #define  MISC_SBD_FLOWCTRL	BIT(4)
 #define  CLK_RMII_OEN		BIT(5)
@@ -76,6 +79,35 @@ exit:
 	return ret;
 }
 
+static int sfgmac_setup_phy_interface(struct sf19a2890_gmac_priv *priv) {
+	phy_interface_t phy_iface;
+	int mode;
+	u32 reg;
+	of_get_phy_mode(priv->dev->of_node, &phy_iface);
+	switch(phy_iface) {
+	case PHY_INTERFACE_MODE_MII:
+	case PHY_INTERFACE_MODE_GMII:
+		mode = PHY_IF_GMII_MII;
+		break;
+	case PHY_INTERFACE_MODE_RMII:
+		mode = PHY_IF_RMII;
+		break;
+	case PHY_INTERFACE_MODE_RGMII:
+	case PHY_INTERFACE_MODE_RGMII_ID:
+	case PHY_INTERFACE_MODE_RGMII_RXID:
+	case PHY_INTERFACE_MODE_RGMII_TXID:
+		mode = PHY_IF_RGMII;
+		break;
+	default:
+		return -EOPNOTSUPP;
+	}
+	reg = readl(priv->gmac_cfg + REG_MISC);
+	reg &= ~MISC_PHY_INTF_SEL;
+	reg |= FIELD_PREP(MISC_PHY_INTF_SEL, mode);
+	writel(reg, priv->gmac_cfg + REG_MISC);
+	return 0;
+}
+
 static int sf19a2890_gmac_probe(struct platform_device *pdev)
 {
 	struct plat_stmmacenet_data *plat_dat;
@@ -102,6 +134,10 @@ static int sf19a2890_gmac_probe(struct platform_device *pdev)
 	ret = sfgmac_set_delay_from_nvmem(priv);
 	if (ret == -EPROBE_DEFER)
 		return -EPROBE_DEFER;
+
+	ret = sfgmac_setup_phy_interface(priv);
+	if (ret)
+		return ret;
 
 	ret = stmmac_get_platform_resources(pdev, &stmmac_res);
 	if (ret)
