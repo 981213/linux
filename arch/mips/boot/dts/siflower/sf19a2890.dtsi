@@ -91,6 +91,8 @@
 			clock-names = "stmmaceth", "pclk", "ptp_ref", "gmac_byp_ref";
 			resets = <&gmacrst 0>;
 			reset-names = "stmmaceth";
+			pinctrl-names = "default";
+			pinctrl-0 = <&rgmii_pins>, <&mdio_pins>;
 			status = "disabled";
 		};
 		// gdma: dma@11800000 {
@@ -118,6 +120,8 @@
 			resets = <&spirst 5>, <&spirst 4>;
 			#address-cells = <1>;
 			#size-cells = <0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&spi_pins>;
 			status = "disabled";
 		};
 
@@ -129,6 +133,8 @@
 			clocks = <&uartclk 4>, <&uartclk 0>;
 			clock-names = "uartclk", "apb_pclk";
 			resets = <&uartrst 4>, <&uartrst 0>;
+			pinctrl-names = "default";
+			pinctrl-0 = <&uart0_pins>;
 			status = "disabled";
 		};
 
@@ -172,6 +178,7 @@
 
 			gpio-controller;
 			#gpio-cells = <2>;
+			gpio-ranges = <&pinctrl 0 0 49>;
 
 			interrupt-controller;
 			#interrupt-cells = <2>;
@@ -325,6 +332,51 @@
 			clocks = <&clk CLK_MUXDIV_PBUS>;
 			clock-output-names = "gpio";
 			#clock-cells = <1>;
+		};
+
+		pinctrl: pinctrl@19e3fc00 {
+			compatible = "siflower,sf19a2890-pinctrl";
+			reg = <0x19e3fc00 0x400>;
+
+			spi_pins: spi-pins {
+				spi-data {
+					pins = "SPI_TXD", "SPI_RXD", "SPI_CLK";
+					function = "func0";
+				};
+
+				spi-cs {
+					PINS = "SPI_CSN";
+					bias-pull-up;
+				};
+			};
+
+			uart0_pins: uart0-pins {
+				pins {
+					pins = "UART_TX", "UART_RX";
+					function = "func0";
+				};
+			};
+
+			rgmii_pins: rgmii-pins {
+				pins {
+					pins = 	"RGMII_GTX_CLK", "RGMII_TX_CLK",
+						"RGMII_TXD0", "RGMII_TXD1",
+						"RGMII_TXD2", "RGMII_TXD3",
+						"RGMII_TXCTL", "RGMII_RXCLK",
+						"RGMII_RXD0", "RGMII_RXD1",
+						"RGMII_RXD2", "RGMII_RXD3",
+						"RGMII_RXCTL", "RGMII_COL",
+						"RGMII_CRS";
+					function = "func0";
+				};
+			};
+
+			mdio_pins: mdio-pins {
+				pins {
+					pins = "RGMII_MDC", "RGMII_MDIO";
+					function = "func0";
+				};
+			};
 		};
 
 		gic: interrupt-controller@1bdc0000 {

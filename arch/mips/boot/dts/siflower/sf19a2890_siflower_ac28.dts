@@ -7,6 +7,13 @@
 	model = "Siflower AC28 Evaluation Board";
 	compatible = "siflower,ac28", "siflower,sf19a2890";
 
+	aliases {
+		led-boot = &led_status;
+		led-failsafe = &led_status;
+		led-running = &led_status;
+		led-upgrade = &led_status;
+	};
+
 	chosen {
 		stdout-path = "serial0:115200n8";
 	};
@@ -14,6 +21,16 @@
 	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x8000000>;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+
+		led_status: status {
+			function = LED_FUNCTION_STATUS;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&gpio 12 GPIO_ACTIVE_LOW>;
+		};
 	};
 
 	keys {
@@ -30,6 +47,8 @@
 &gmac {
 	status = "okay";
 	phy-mode = "rgmii";
+	/* not quite right here... */
+	snps,ps-speed = <1000>;
 	nvmem-cells = <&rgmii_delay_factory_b2>;
 	nvmem-cell-names = "rgmii-delay";
 	fixed-link {
