@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 
+#include <linux/pinctrl/consumer.h>
 #include <linux/clk.h>
 #include <linux/gpio/driver.h>
 #include <linux/module.h>
@@ -71,8 +72,7 @@ static int sf_gpio_direction_input(struct gpio_chip *gc, unsigned int offset)
 	struct sf_gpio_priv *priv = to_sf_gpio(gc);
 
 	sf_gpio_wr(priv, GPIO_DIR(offset), 1);
-
-	return 0;
+	return pinctrl_gpio_direction_input(gc->base + offset);
 }
 
 static int sf_gpio_direction_output(struct gpio_chip *gc, unsigned int offset,
@@ -82,8 +82,7 @@ static int sf_gpio_direction_output(struct gpio_chip *gc, unsigned int offset,
 
 	sf_gpio_wr(priv, GPIO_OR(offset), value);
 	sf_gpio_wr(priv, GPIO_DIR(offset), 0);
-
-	return 0;
+	return pinctrl_gpio_direction_output(gc->base + offset);
 }
 
 static int sf_gpio_set_debounce(struct gpio_chip *gc, unsigned int offset,
@@ -113,8 +112,7 @@ static int sf_gpio_set_config(struct gpio_chip *gc, unsigned int offset,
 		return sf_gpio_set_debounce(gc, offset,
 					    pinconf_to_config_argument(config));
 	default:
-	// FIXME: missing pinconf driver
-		return 0;//gpiochip_generic_config(gc, offset, config);
+		return gpiochip_generic_config(gc, offset, config);
 	}
 }
 
@@ -326,7 +324,7 @@ static int sf_gpio_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id sf_gpio_ids[] = {
-	{ .compatible = "siflower,sf19a2890-gpio", .data = (void *)48 },
+	{ .compatible = "siflower,sf19a2890-gpio", .data = (void *)49 },
 	{},
 };
 MODULE_DEVICE_TABLE(of, sf_gpio_ids);
