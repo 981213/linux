@@ -94,6 +94,12 @@
 			pinctrl-names = "default";
 			pinctrl-0 = <&rgmii_pins>, <&mdio_pins>;
 			status = "disabled";
+
+			mdio: mdio {
+				compatible = "snps,dwmac-mdio";
+				#address-cells = <1>;
+				#size-cells = <0>;
+			};
 		};
 		// gdma: dma@11800000 {
 		// 	compatible = "arm,pl330", "arm,primecell";
@@ -359,14 +365,12 @@
 
 			rgmii_pins: rgmii-pins {
 				pins {
-					pins = 	"RGMII_GTX_CLK", "RGMII_TX_CLK",
-						"RGMII_TXD0", "RGMII_TXD1",
-						"RGMII_TXD2", "RGMII_TXD3",
-						"RGMII_TXCTL", "RGMII_RXCLK",
-						"RGMII_RXD0", "RGMII_RXD1",
-						"RGMII_RXD2", "RGMII_RXD3",
-						"RGMII_RXCTL", "RGMII_COL",
-						"RGMII_CRS";
+					pins =  "RGMII_TX_CLK", "RGMII_TXD0",
+						"RGMII_TXD1", "RGMII_TXD2",
+						"RGMII_TXD3", "RGMII_TXCTL",
+						"RGMII_RXCLK", "RGMII_RXD0",
+						"RGMII_RXD1", "RGMII_RXD2",
+						"RGMII_RXD3", "RGMII_RXCTL";
 					function = "func0";
 				};
 			};

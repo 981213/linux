@@ -56,10 +56,6 @@
 		full-duplex;
 		pause;
 	};
-
-	mdio {
-		
-	};
 };
 
 &uart0 {
