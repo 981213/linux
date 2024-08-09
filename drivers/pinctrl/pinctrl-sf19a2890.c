@@ -180,14 +180,13 @@ static inline u32 sf_pinctrl_rd(struct sf_pinctrl *pc, unsigned reg)
 	return readl(pc->base + reg);
 }
 
-static inline void sf_pinctrl_wr(struct sf_pinctrl *pc, unsigned reg,
-		u32 val)
+static inline void sf_pinctrl_wr(struct sf_pinctrl *pc, unsigned reg, u32 val)
 {
 	writel(val, pc->base + reg);
 }
 
-static inline void sf_pinctrl_rmw(struct sf_pinctrl *pc, unsigned reg,
-		u32 clr, u32 set)
+static inline void sf_pinctrl_rmw(struct sf_pinctrl *pc, unsigned reg, u32 clr,
+				  u32 set)
 {
 	u32 val = sf_pinctrl_rd(pc, reg);
 	val &= ~clr;
@@ -201,15 +200,15 @@ static int sf19a2890_pctl_get_groups_count(struct pinctrl_dev *pctldev)
 }
 
 static const char *sf19a2890_pctl_get_group_name(struct pinctrl_dev *pctldev,
-		unsigned selector)
+						 unsigned selector)
 {
 	return sf19a2890_gpio_groups[selector];
 }
 
 static int sf19a2890_pctl_get_group_pins(struct pinctrl_dev *pctldev,
-		unsigned selector,
-		const unsigned **pins,
-		unsigned *num_pins)
+					 unsigned selector,
+					 const unsigned **pins,
+					 unsigned *num_pins)
 {
 	*pins = &sf19a2890_gpio_pins[selector].number;
 	*num_pins = 1;
@@ -218,30 +217,29 @@ static int sf19a2890_pctl_get_group_pins(struct pinctrl_dev *pctldev,
 }
 
 static void sf19a2890_pctl_pin_dbg_show(struct pinctrl_dev *pctldev,
-		struct seq_file *s,
-		unsigned offset)
+					struct seq_file *s, unsigned offset)
 {
 	struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
 	u32 conf = sf_pinctrl_rd(pc, SF19A28_REG_PC(offset));
 	u32 mux = sf_pinctrl_rd(pc, SF19A28_REG_PMX(offset));
 
-	if(!(mux & PMX_FUNC_SW))
+	if (!(mux & PMX_FUNC_SW))
 		seq_printf(s, "Forced OE");
-	else if(mux & PMX_FMUX_SEL)
+	else if (mux & PMX_FMUX_SEL)
 		seq_printf(s, "GPIO");
 	else
 		seq_printf(s, "Func%lu", mux & PMX_MODE);
 	seq_printf(s, " |");
 
-	if(!(conf & PC_OEN) && !(mux & PMX_FUNC_SW))
+	if (!(conf & PC_OEN) && !(mux & PMX_FUNC_SW))
 		seq_printf(s, " Output");
-	if((conf & PC_ST))
+	if ((conf & PC_ST))
 		seq_printf(s, " Schmitt_Trigger");
-	if((conf & PC_IE))
+	if ((conf & PC_IE))
 		seq_printf(s, " Input");
-	if((conf & PC_PD))
+	if ((conf & PC_PD))
 		seq_printf(s, " Pull_Down");
-	if((conf & PC_PU))
+	if ((conf & PC_PU))
 		seq_printf(s, " Pull_Up");
 
 	seq_printf(s, " Drive: %lu", conf & PC_DS);
@@ -256,23 +254,13 @@ static const struct pinctrl_ops sf19a2890_pctl_ops = {
 	.dt_free_map = pinconf_generic_dt_free_map,
 };
 
-static int sf19a2890_pmx_request(struct pinctrl_dev *pctldev,
-		unsigned offset)
+static int sf19a2890_pmx_free(struct pinctrl_dev *pctldev, unsigned offset)
 {
-	struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
-	/* do nothing. */
-	dev_info(pc->dev, "pmx request %u\n", offset);
-	return 0;
-}
-
-static int sf19a2890_pmx_free(struct pinctrl_dev *pctldev,
-		unsigned offset)
-{
-	struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
+	// FIXME: This can't be added until pinconf is ready
+	// struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
 	/* Put the pin into High-Z */
-	dev_info(pc->dev, "pmx free %u\n", offset);
-	sf_pinctrl_rmw(pc, SF19A28_REG_PC(offset), PC_IE, PC_OEN);
-	sf_pinctrl_rmw(pc, SF19A28_REG_PMX(offset), PMX_FUNC_SW, 0);
+	// sf_pinctrl_rmw(pc, SF19A28_REG_PC(offset), PC_IE, PC_OEN);
+	// sf_pinctrl_rmw(pc, SF19A28_REG_PMX(offset), PMX_FUNC_SW, 0);
 	return 0;
 }
 
@@ -282,15 +270,15 @@ static int sf19a2890_pmx_get_functions_count(struct pinctrl_dev *pctldev)
 }
 
 static const char *sf19a2890_pmx_get_function_name(struct pinctrl_dev *pctldev,
-		unsigned selector)
+						   unsigned selector)
 {
 	return sf19a2890_functions[selector];
 }
 
 static int sf19a2890_pmx_get_function_groups(struct pinctrl_dev *pctldev,
-		unsigned selector,
-		const char * const **groups,
-		unsigned * const num_groups)
+					     unsigned selector,
+					     const char *const **groups,
+					     unsigned *const num_groups)
 {
 	/* every pin can do every function */
 	*groups = sf19a2890_gpio_groups;
@@ -300,13 +288,12 @@ static int sf19a2890_pmx_get_function_groups(struct pinctrl_dev *pctldev,
 }
 
 static int sf19a2890_pmx_set(struct pinctrl_dev *pctldev,
-		unsigned func_selector,
-		unsigned group_selector)
+			     unsigned func_selector, unsigned group_selector)
 {
 	struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
 	unsigned pin = group_selector;
-	dev_info(pc->dev, "pmx set func %u group %u\n", func_selector, group_selector);
-	sf_pinctrl_wr(pc, SF19A28_REG_PMX(pin), PMX_FUNC_SW | FIELD_PREP(PMX_MODE, func_selector));
+	sf_pinctrl_wr(pc, SF19A28_REG_PMX(pin),
+		      PMX_FUNC_SW | FIELD_PREP(PMX_MODE, func_selector));
 	return 0;
 }
 
@@ -332,7 +319,6 @@ static int sf19a2890_pmx_gpio_set_direction(struct pinctrl_dev *pctldev,
 {
 	struct sf_pinctrl *pc = pinctrl_dev_get_drvdata(pctldev);
 
-	dev_info(pc->dev, "pmx gpio %u dir %s\n", offset, input ? "input" : "output");
 	if (input)
 		sf_pinctrl_rmw(pc, SF19A28_REG_PC(offset), 0, PC_IE | PC_OEN);
 	else
@@ -341,7 +327,6 @@ static int sf19a2890_pmx_gpio_set_direction(struct pinctrl_dev *pctldev,
 }
 
 static const struct pinmux_ops sf19a2890_pmx_ops = {
-	.request = sf19a2890_pmx_request,
 	.free = sf19a2890_pmx_free,
 	.get_functions_count = sf19a2890_pmx_get_functions_count,
 	.get_function_name = sf19a2890_pmx_get_function_name,
@@ -373,9 +358,8 @@ static const struct pinctrl_gpio_range sf_pinctrl_gpio_range = {
 	.npins = SF19A28_NUM_GPIOS,
 };
 
-
 static const struct of_device_id sf_pinctrl_match[] = {
-	{ .compatible = "siflower,sf19a2890-pinctrl", },
+	{ .compatible = "siflower,sf19a2890-pinctrl" },
 	{}
 };
 
