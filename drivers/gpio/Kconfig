@@ -576,6 +576,14 @@ config GPIO_SIFIVE
 	help
 	  Say yes here to support the GPIO device on SiFive SoCs.
 
+config GPIO_SIFLOWER
+	tristate "SiFlower GPIO support"
+	depends on OF_GPIO
+	depends on MACH_SIFLOWER_MIPS || RISCV || COMPILE_TEST
+	select GPIOLIB_IRQCHIP
+	help
+	  GPIO controller driver for SiFlower SoCs.
+
 config GPIO_SIOX
 	tristate "SIOX GPIO support"
 	depends on SIOX
