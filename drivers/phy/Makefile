@@ -29,6 +29,7 @@ obj-y					+= allwinner/	\
 					   renesas/	\
 					   rockchip/	\
 					   samsung/	\
+					   siflower/	\
 					   socionext/	\
 					   st/		\
 					   starfive/	\
