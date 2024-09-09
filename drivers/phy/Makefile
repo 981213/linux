@@ -39,6 +39,7 @@ obj-$(CONFIG_GENERIC_PHY)		+= allwinner/	\
 					   renesas/	\
 					   rockchip/	\
 					   samsung/	\
+					   siflower/	\
 					   socionext/	\
 					   sophgo/	\
 					   spacemit/	\
