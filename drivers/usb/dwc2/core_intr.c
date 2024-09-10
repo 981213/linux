@@ -79,7 +79,7 @@ static void dwc2_handle_mode_mismatch_intr(struct dwc2_hsotg *hsotg)
  *
  * @hsotg: Programming view of DWC_otg controller
  */
-static void dwc2_handle_otg_intr(struct dwc2_hsotg *hsotg)
+static irqreturn_t dwc2_handle_otg_intr(struct dwc2_hsotg *hsotg)
 {
 	u32 gotgint;
 	u32 gotgctl;
@@ -87,6 +87,10 @@ static void dwc2_handle_otg_intr(struct dwc2_hsotg *hsotg)
 
 	gotgint = dwc2_readl(hsotg, GOTGINT);
 	gotgctl = dwc2_readl(hsotg, GOTGCTL);
+
+	if (!gotgint)
+		return IRQ_NONE;
+
 	dev_dbg(hsotg->dev, "++OTG Interrupt gotgint=%0x [%s]\n", gotgint,
 		dwc2_op_state_str(hsotg));
 
@@ -229,6 +233,7 @@ static void dwc2_handle_otg_intr(struct dwc2_hsotg *hsotg)
 
 	/* Clear GOTGINT */
 	dwc2_writel(hsotg, gotgint, GOTGINT);
+	return IRQ_HANDLED;
 }
 
 /**
@@ -842,6 +847,8 @@ irqreturn_t dwc2_handle_common_intr(int irq, void *dev)
 		hsotg->frame_number = (dwc2_readl(hsotg, HFNUM)
 				       & HFNUM_FRNUM_MASK) >> HFNUM_FRNUM_SHIFT;
 
+	retval = dwc2_handle_otg_intr(hsotg);
+
 	gintsts = dwc2_read_common_intr(hsotg);
 	if (gintsts & ~GINTSTS_PRTINT)
 		retval = IRQ_HANDLED;
@@ -855,8 +862,6 @@ irqreturn_t dwc2_handle_common_intr(int irq, void *dev)
 
 	if (gintsts & GINTSTS_MODEMIS)
 		dwc2_handle_mode_mismatch_intr(hsotg);
-	if (gintsts & GINTSTS_OTGINT)
-		dwc2_handle_otg_intr(hsotg);
 	if (gintsts & GINTSTS_CONIDSTSCHNG)
 		dwc2_handle_conn_id_status_change_intr(hsotg);
 	if (gintsts & GINTSTS_DISCONNINT)
