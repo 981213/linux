@@ -579,7 +579,7 @@ config GPIO_SIFIVE
 config GPIO_SIFLOWER
 	tristate "SiFlower GPIO support"
 	depends on OF_GPIO
-	depends on MACH_SIFLOWER_MIPS || COMPILE_TEST
+	depends on MACH_SIFLOWER_MIPS || RISCV || COMPILE_TEST
 	select GPIOLIB_IRQCHIP
 	help
 	  GPIO controller driver for SiFlower SoCs.
