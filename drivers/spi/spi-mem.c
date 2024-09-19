@@ -412,14 +412,20 @@ int spi_mem_exec_op(struct spi_mem *mem, const struct spi_mem_op *op)
 	if (!spi_mem_internal_supports_op(mem, op))
 		return -EOPNOTSUPP;
 
-	if (ctlr->mem_ops && ctlr->mem_ops->exec_op && !spi_get_csgpiod(mem->spi, 0)) {
+	if (ctlr->mem_ops && ctlr->mem_ops->exec_op) {
 		ret = spi_mem_access_start(mem);
 		if (ret)
 			return ret;
 
 		trace_spi_mem_start_op(mem, op);
+		if (spi_get_csgpiod(mem->spi, 0))
+			gpiod_set_value_cansleep(spi_get_csgpiod(mem->spi, 0), 1);
+
 		ret = ctlr->mem_ops->exec_op(mem, op);
 		trace_spi_mem_stop_op(mem, op);
+
+		if (spi_get_csgpiod(mem->spi, 0))
+			gpiod_set_value_cansleep(spi_get_csgpiod(mem->spi, 0), 0);
 
 		spi_mem_access_end(mem);
 
