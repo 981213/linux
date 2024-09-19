@@ -940,6 +940,13 @@ config SPI_SIFIVE
 	help
 	  This exposes the SPI controller IP from SiFive.
 
+config SPI_SF21_QSPI
+	tristate "Siflower SF21A6826/SF21H8898 QSPI controller"
+	depends on ARCH_SIFLOWER || COMPILE_TEST
+	help
+	  This enables support for the SPI controller present on the
+	  Siflower SF21A6826/SF21H8898 SoCs.
+
 config SPI_SLAVE_MT27XX
 	tristate "MediaTek SPI slave device"
 	depends on ARCH_MEDIATEK || COMPILE_TEST
