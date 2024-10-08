@@ -26,6 +26,21 @@ libphy-$(CONFIG_LED_TRIGGER_PHY)	+= phy_led_triggers.o
 obj-$(CONFIG_PHYLINK)		+= phylink.o
 obj-$(CONFIG_PHYLIB)		+= libphy.o
 
+obj-$(CONFIG_SWCONFIG)		+= swconfig.o
+obj-$(CONFIG_ADM6996_PHY)	+= adm6996.o
+obj-$(CONFIG_AR8216_PHY)	+= ar8xxx.o
+ar8xxx-y			+= ar8216.o
+ar8xxx-y			+= ar8327.o
+obj-$(CONFIG_SWCONFIG_B53)	+= b53/
+obj-$(CONFIG_IP17XX_PHY)	+= ip17xx.o
+obj-$(CONFIG_PSB6970_PHY)	+= psb6970.o
+obj-$(CONFIG_RTL8306_PHY)	+= rtl8306.o
+obj-$(CONFIG_RTL8366_SMI)	+= rtl8366_smi.o
+obj-$(CONFIG_RTL8366S_PHY)	+= rtl8366s.o
+obj-$(CONFIG_RTL8366RB_PHY)	+= rtl8366rb.o
+obj-$(CONFIG_RTL8367_PHY)	+= rtl8367.o
+obj-$(CONFIG_RTL8367B_PHY)	+= rtl8367b.o
+
 obj-$(CONFIG_NETWORK_PHY_TIMESTAMPING) += mii_timestamper.o
 
 obj-$(CONFIG_SFP)		+= sfp.o
@@ -34,13 +49,9 @@ obj-y				+= $(sfp-obj-y) $(sfp-obj-m)
 
 obj-$(CONFIG_ADIN_PHY)		+= adin.o
 obj-$(CONFIG_ADIN1100_PHY)	+= adin1100.o
+obj-$(CONFIG_AIR_EN8811H_PHY)   += air_en8811h.o
 obj-$(CONFIG_AMD_PHY)		+= amd.o
-aquantia-objs			+= aquantia_main.o
-ifdef CONFIG_HWMON
-aquantia-objs			+= aquantia_hwmon.o
-endif
-obj-$(CONFIG_AQUANTIA_PHY)	+= aquantia.o
-obj-$(CONFIG_AT803X_PHY)	+= at803x.o
+obj-$(CONFIG_AQUANTIA_PHY)	+= aquantia/
 obj-$(CONFIG_AX88796B_PHY)	+= ax88796b.o
 obj-$(CONFIG_BCM54140_PHY)	+= bcm54140.o
 obj-$(CONFIG_BCM63XX_PHY)	+= bcm63xx.o
@@ -86,6 +97,7 @@ obj-$(CONFIG_NCN26000_PHY)	+= ncn26000.o
 obj-$(CONFIG_NXP_C45_TJA11XX_PHY)	+= nxp-c45-tja11xx.o
 obj-$(CONFIG_NXP_CBTX_PHY)	+= nxp-cbtx.o
 obj-$(CONFIG_NXP_TJA11XX_PHY)	+= nxp-tja11xx.o
+obj-y				+= qcom/
 obj-$(CONFIG_QSEMI_PHY)		+= qsemi.o
 obj-$(CONFIG_REALTEK_PHY)	+= realtek.o
 obj-$(CONFIG_RENESAS_PHY)	+= uPD60620.o

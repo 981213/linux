@@ -43,6 +43,7 @@ const char * const dev_state_tran_str[DEV_ST_TRANSITION_MAX] = {
 	[DEV_ST_TRANSITION_FP] = "FLASH PROGRAMMER",
 	[DEV_ST_TRANSITION_SYS_ERR] = "SYS ERROR",
 	[DEV_ST_TRANSITION_DISABLE] = "DISABLE",
+	[DEV_ST_TRANSITION_DISABLE_DESTROY_DEVICE] = "DISABLE (DESTROY DEVICE)",
 };
 
 const char * const mhi_ch_state_type_str[MHI_CH_STATE_TYPE_MAX] = {
@@ -882,6 +883,7 @@ static int parse_config(struct mhi_controller *mhi_cntrl,
 	if (!mhi_cntrl->timeout_ms)
 		mhi_cntrl->timeout_ms = MHI_TIMEOUT_MS;
 
+	mhi_cntrl->ready_timeout_ms = config->ready_timeout_ms;
 	mhi_cntrl->bounce_buf = config->use_bounce_buf;
 	mhi_cntrl->buffer_len = config->buf_len;
 	if (!mhi_cntrl->buffer_len)
