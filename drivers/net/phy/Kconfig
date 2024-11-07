@@ -471,3 +471,8 @@ config XILINX_GMII2RGMII
 	  Ethernet physical media devices and the Gigabit Ethernet controller.
 
 endif # PHYLIB
+
+config SIFLOWER_PHY
+	tristate "Siflower PHYs"
+	help
+	  Currently supports the SF1211F, SF1240 gigabit PHY.
