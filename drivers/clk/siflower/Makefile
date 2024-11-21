@@ -1,0 +1,1 @@
+obj-$(CONFIG_CLK_SF19A2890) += clk-sf19a2890.o
