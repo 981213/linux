@@ -317,6 +317,15 @@ config PCIE_FU740
 	  Say Y here if you want PCIe controller support for the SiFive
 	  FU740.
 
+config PCIE_SF21
+	bool "Siflower SF21A6826/SF21H8898 PCIe controller"
+	depends on ARCH_SIFLOWER || COMPILE_TEST
+	depends on PCI_MSI
+	select PCIE_DW_HOST
+	help
+	  Say Y here to enable support of the Siflower SF21A6826/SF21H8898
+	  PCIe controller.
+
 config PCIE_UNIPHIER
 	bool "Socionext UniPhier PCIe controller (host mode)"
 	depends on ARCH_UNIPHIER || COMPILE_TEST
