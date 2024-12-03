@@ -15,16 +15,6 @@
 #include <linux/module.h>
 #include <linux/delay.h>
 
-/* for wol feature */
-#include <linux/netdevice.h>
-
-/* WOL Enable Flag:
- * disable by default to enable system WOL feature of phy
- * please define this phy to 1 otherwise, define it to 0.
- */
-#define SIFLOWER_PHY_WOL_FEATURE_ENABLE                         0
-#define SIFLOWER_PHY_WOL_PASSWD_ENABLE                          0
-
 #define SIFLOWER_PHY_MODE_SET_ENABLE                            0
 #define SIFLOWER_PHY_RXC_DELAY_SET_ENABLE                       0
 #define SIFLOWER_PHY_RXC_DELAY_VAL                              0x40
@@ -539,7 +529,6 @@ int sf1211f_config_aneg(struct phy_device *phydev)
 	return 0;
 }
 
-#if (KERNEL_VERSION(3, 14, 79) < LINUX_VERSION_CODE)
 int sf1211f_aneg_done(struct phy_device *phydev)
 {
 	int val = 0;
@@ -554,168 +543,7 @@ int sf1211f_aneg_done(struct phy_device *phydev)
 
 	return genphy_aneg_done(phydev);
 }
-#endif
 
-#if (SIFLOWER_PHY_WOL_FEATURE_ENABLE)
-static void siflower_get_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol)
-{
-	int val = 0;
-	wol->supported = WAKE_MAGIC;
-	wol->wolopts = 0;
-
-	val = siflower_phy_ext_read(phydev, SIFLOWER_WOL_CFG_REG1);
-	if (val < 0)
-		return;
-
-	if (val & SIFLOWER_WOL_EN)
-		wol->wolopts |= WAKE_MAGIC;
-
-	return;
-}
-
-static int siflower_wol_en_cfg(struct phy_device *phydev, siflower_wol_cfg_t wol_cfg)
-{
-	int ret, val0,val1;
-
-	val0 = siflower_phy_ext_read(phydev, SIFLOWER_WOL_CFG_REG0);
-	if (val0 < 0)
-		return val0;
-	val1 = siflower_phy_ext_read(phydev, SIFLOWER_WOL_CFG_REG1);
-	if (val1 < 0)
-		return val1;
-	if (wol_cfg.wolen) {
-		val1 |= SIFLOWER_WOL_EN;
-		if (wol_cfg.type == SFPHY_WOL_TYPE_LEVEL) {
-			val0 |= SIFLOWER_WOL_TYPE;
-		} else if (wol_cfg.type == SFPHY_WOL_TYPE_PULSE) {
-			ret = siflower_phy_ext_write(phydev, SIFLOWER_PHY_WOL_PULSE_MODE_SET, 0x04);//set int pin pulse
-			if (ret < 0)
-				return ret;
-			val0 &= ~SIFLOWER_WOL_TYPE;
-			if (wol_cfg.width == SFPHY_WOL_WIDTH_84MS) {
-				val0 &= ~SIFLOWER_WOL_WIDTH1;
-				val0 &= ~SIFLOWER_WOL_WIDTH2;
-			} else if (wol_cfg.width == SFPHY_WOL_WIDTH_168MS) {
-				val0 |= SIFLOWER_WOL_WIDTH1;
-				val0 &= ~SIFLOWER_WOL_WIDTH2;
-			} else if (wol_cfg.width == SFPHY_WOL_WIDTH_336MS) {
-				val0 &= ~SIFLOWER_WOL_WIDTH1;
-				val0 |= SIFLOWER_WOL_WIDTH2;
-			} else if (wol_cfg.width == SFPHY_WOL_WIDTH_672MS) {
-				val0 |= SIFLOWER_WOL_WIDTH1;
-				val0 |= SIFLOWER_WOL_WIDTH2;
-			}
-		}
-		if (wol_cfg.secure == SFPHY_GLB_ENABLE)
-			val1 |= SIFLOWER_WOL_SECURE_CHECK;
-		else
-			val1 &= ~SIFLOWER_WOL_SECURE_CHECK;
-		if (wol_cfg.checkcrc == SFPHY_GLB_ENABLE)
-			val0 |= SIFLOWER_WOL_CRC_CHECK;
-		else
-			val0 &= ~SIFLOWER_WOL_CRC_CHECK;
-		if (wol_cfg.checkdst == SFPHY_GLB_ENABLE)
-			val0 |= SIFLOWER_WOL_DESTADDR_CHECK;
-		else
-			val0 &= ~SIFLOWER_WOL_DESTADDR_CHECK;
-	} else {
-		val1 &= ~SIFLOWER_WOL_EN;
-	}
-
-	ret = siflower_phy_ext_write(phydev, SIFLOWER_WOL_CFG_REG0, val0);
-	if (ret < 0)
-		return ret;
-	ret = siflower_phy_ext_write(phydev, SIFLOWER_WOL_CFG_REG1, val1);
-	if (ret < 0)
-		return ret;
-	return 0;
-}
-
-static int siflower_set_wol(struct phy_device *phydev, struct ethtool_wolinfo *wol)
-{
-	int ret, val, i, phymode;
-	siflower_wol_cfg_t wol_cfg;
-
-	phymode = SFPHY_MODE_CURR;
-	memset(&wol_cfg,0,sizeof(siflower_wol_cfg_t));
-
-	if (wol->wolopts & WAKE_MAGIC) {
-		if (phymode == SFPHY_PORT_TYPE_UTP || phymode == SFPHY_PORT_TYPE_COMBO) {
-		/* Enable the WOL interrupt */
-		val = sfphy_page_read(phydev, SFPHY_REG_UTP_SPACE, SIFLOWER_INTR_REG);
-		val |= SIFLOWER_WOL_INTR_EN;
-		ret = sfphy_page_write(phydev, SFPHY_REG_UTP_SPACE, SIFLOWER_INTR_REG, val);
-		if (ret < 0)
-			return ret;
-		}
-		if (phymode == SFPHY_PORT_TYPE_FIBER || phymode == SFPHY_PORT_TYPE_COMBO) {
-			/* Enable the WOL interrupt */
-			val = sfphy_page_read(phydev, SFPHY_REG_FIBER_SPACE, SIFLOWER_INTR_REG);
-			val |= SIFLOWER_WOL_INTR_EN;
-			ret = sfphy_page_write(phydev, SFPHY_REG_FIBER_SPACE, SIFLOWER_INTR_REG, val);
-			if (ret < 0)
-				return ret;
-		}
-		/* Set the WOL config */
-		wol_cfg.wolen = SFPHY_GLB_ENABLE;
-		wol_cfg.type  = SFPHY_WOL_TYPE_PULSE;
-		wol_cfg.width = SFPHY_WOL_WIDTH_672MS;
-		wol_cfg.checkdst  = SFPHY_GLB_ENABLE;
-		wol_cfg.checkcrc = SFPHY_GLB_ENABLE;
-		ret = siflower_wol_en_cfg(phydev, wol_cfg);
-		if (ret < 0)
-			return ret;
-
-		/* Store the device address for the magic packet */
-		for(i = 0; i < 6; ++i) {
-			ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_MAC_ADDR - i,
-				((phydev->attached_dev->dev_addr[i])));
-			if (ret < 0)
-				return ret;
-		}
-#if SIFLOWER_PHY_WOL_PASSWD_ENABLE
-		/* Set passwd for the magic packet */
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR, SIFLOWER_MAGIC_PACKET_PASSWD1);
-		if (ret < 0)
-			return ret;
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR - 1, SIFLOWER_MAGIC_PACKET_PASSWD2);
-		if (ret < 0)
-			return ret;
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR - 2, SIFLOWER_MAGIC_PACKET_PASSWD3);
-		if (ret < 0)
-			return ret;
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR - 3, SIFLOWER_MAGIC_PACKET_PASSWD4);
-		if (ret < 0)
-			return ret;
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR - 4, SIFLOWER_MAGIC_PACKET_PASSWD5);
-		if (ret < 0)
-			return ret;
-		ret = siflower_phy_ext_write(phydev, SIFLOWER_MAGIC_PACKET_PASSWD_ADDR - 5, SIFLOWER_MAGIC_PACKET_PASSWD6);
-		if (ret < 0)
-			return ret;
-#endif
-	} else {
-		wol_cfg.wolen = SFPHY_GLB_DISABLE;
-		wol_cfg.type  = SFPHY_WOL_TYPE_EXT;
-		wol_cfg.width = SFPHY_WOL_WIDTH_EXT;
-		wol_cfg.checkdst  = SFPHY_GLB_DISABLE;
-		wol_cfg.checkcrc  = SFPHY_GLB_DISABLE;
-		ret = siflower_wol_en_cfg(phydev, wol_cfg);
-		if (ret < 0)
-			return ret;
-	}
-
-	if (val == SF1211F_EXTREG_PHY_MODE_UTP_TO_SGMII) {
-		val = sfphy_page_read(phydev, SFPHY_REG_UTP_SPACE, MII_BMCR);
-		val |= SIFLOWER_WOL_RESTARTANEG;
-		ret = sfphy_page_write(phydev, SFPHY_REG_UTP_SPACE, MII_BMCR, val);
-		if (ret < 0)
-			return ret;
-	}
-
-	return 0;
-}
-#endif
 static int sf1211f_rxc_txc_init(struct phy_device *phydev)
 {
 	int ret;
@@ -866,10 +694,6 @@ int sf1211f_config_init(struct phy_device *phydev)
 {
 	int ret, phymode;
 
-#if SIFLOWER_PHY_WOL_FEATURE_ENABLE
-	struct ethtool_wolinfo wol;
-#endif
-
 #if SIFLOWER_PHY_MODE_SET_ENABLE
 	ret = phy_mode_set(phydev, 0x0);
 	if (ret < 0)
@@ -908,20 +732,12 @@ int sf1211f_config_init(struct phy_device *phydev)
 		return ret;
 #endif
 
-#if SIFLOWER_PHY_WOL_FEATURE_ENABLE
-	wol.wolopts = 0;
-	wol.supported = WAKE_MAGIC;
-	wol.wolopts |= WAKE_MAGIC;
-	siflower_set_wol(phydev, &wol);
-#endif
-
 	return sf1211f_led_init(phydev);
 }
 
 static struct phy_driver sf_phy_drivers[] = {
 	{
-		.phy_id             = SF1211F_PHY_ID,
-		.phy_id_mask        = SIFLOWER_PHY_ID_MASK,
+		PHY_ID_MATCH_EXACT(SF1211F_PHY_ID),
 		.name               = "SF1211F Gigabit Ethernet",
 		.features           = PHY_GBIT_FEATURES,
 		.flags              = PHY_POLL,
@@ -932,15 +748,10 @@ static struct phy_driver sf_phy_drivers[] = {
 		.read_mmd           = genphy_read_mmd_unsupported,
 		.suspend            = genphy_suspend,
 		.resume             = genphy_resume,
-#if SIFLOWER_PHY_WOL_FEATURE_ENABLE
-		.get_wol            = &siflower_get_wol,
-		.set_wol            = &siflower_set_wol,
-#endif
 	},
 
 	{
-		.phy_id             = SF1240_PHY_ID,
-		.phy_id_mask        = SIFLOWER_PHY_ID_MASK,
+		PHY_ID_MATCH_EXACT(SF1240_PHY_ID),
 		.name               = "SF1240 Gigabit Ethernet",
 		.features           = PHY_GBIT_FEATURES,
 		.flags              = PHY_POLL,
@@ -953,12 +764,11 @@ static struct phy_driver sf_phy_drivers[] = {
 	},
 };
 
-/* for linux 4.x */
 module_phy_driver(sf_phy_drivers);
 
 static struct mdio_device_id __maybe_unused siflower_phy_tbl[] = {
-	{ SF1211F_PHY_ID, SIFLOWER_PHY_ID_MASK },
-	{ SF1240_PHY_ID, SIFLOWER_PHY_ID_MASK },
+	{ PHY_ID_MATCH_EXACT(SF1211F_PHY_ID) },
+	{ PHY_ID_MATCH_EXACT(SF1240_PHY_ID) },
 	{},
 };
 
