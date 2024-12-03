@@ -14,11 +14,6 @@
 #include <linux/phy.h>
 #include <linux/module.h>
 #include <linux/delay.h>
-#ifndef LINUX_VERSION_CODE
-#include <linux/version.h>
-#else
-#define KERNEL_VERSION(a, b, c) (((a) << 16) + ((b) << 8) + (c))
-#endif
 
 /* for wol feature */
 #include <linux/netdevice.h>
@@ -178,66 +173,6 @@ typedef struct siflower_wol_cfg_s
 	int checkcrc;
 	int checkdst;
 }siflower_wol_cfg_t;
-
-#if (KERNEL_VERSION(5, 5, 0) > LINUX_VERSION_CODE)
-static inline void phy_lock_mdio_bus(struct phy_device *phydev)
-{
-#if (KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE)
-	mutex_lock(&phydev->bus->mdio_lock);
-#else
-	mutex_lock(&phydev->mdio.bus->mdio_lock);
-#endif
-}
-
-static inline void phy_unlock_mdio_bus(struct phy_device *phydev)
-{
-#if (KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE)
-	mutex_unlock(&phydev->bus->mdio_lock);
-#else
-	mutex_unlock(&phydev->mdio.bus->mdio_lock);
-#endif
-}
-#endif
-
-#if (KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE)
-static inline int __phy_read(struct phy_device *phydev, u32 regnum)
-{
-#if (KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE)
-	struct mii_bus *bus = phydev->bus;
-	int addr = phydev->addr;
-	return bus->read(bus, phydev->addr, regnum);
-#else
-	struct mii_bus *bus = phydev->mdio.bus;
-	int addr = phydev->mdio.addr;
-#endif
-	return bus->read(bus, addr, regnum);
-}
-
-static inline int __phy_write(struct phy_device *phydev, u32 regnum, u16 val)
-{
-#if (KERNEL_VERSION(4, 5, 0) > LINUX_VERSION_CODE)
-	struct mii_bus *bus = phydev->bus;
-	int addr = phydev->addr;
-#else
-	struct mii_bus *bus = phydev->mdio.bus;
-	int addr = phydev->mdio.addr;
-#endif
-	return bus->write(bus, addr, regnum, val);
-}
-#endif
-
-#if (KERNEL_VERSION(4, 12, 0) <= LINUX_VERSION_CODE) && (KERNEL_VERSION(4, 16, 0) > LINUX_VERSION_CODE)
-static int genphy_read_mmd_unsupported(struct phy_device *phdev, int devad, u16 regnum)
-{
-	return -EOPNOTSUPP;
-}
-
-static int genphy_write_mmd_unsupported(struct phy_device *phdev, int devnum,
-				u16 regnum, u16 val)
-{
-	return -EOPNOTSUPP;
-}
-#endif
 
 static int sf1211f_phy_ext_read(struct phy_device *phydev, u32 regnum)
 {
@@ -913,73 +848,17 @@ static int phy_mode_set(struct phy_device *phydev, u16 phyMode)
 }
 #endif
 
-#if (KERNEL_VERSION(3, 16, 0) > LINUX_VERSION_CODE)
-static int genphy_config_init(struct phy_device *phydev)
-{
-	int val;
-	u32 features;
-
-	features = (SUPPORTED_TP | SUPPORTED_MII
-			| SUPPORTED_AUI | SUPPORTED_FIBRE |
-			SUPPORTED_BNC | SUPPORTED_Pause | SUPPORTED_Asym_Pause);
-
-	/* Do we support autonegotiation? */
-	val = phy_read(phydev, MII_BMSR);
-	if (val < 0)
-		return val;
-
-	if (val & BMSR_ANEGCAPABLE)
-		features |= SUPPORTED_Autoneg;
-
-	if (val & BMSR_100FULL)
-		features |= SUPPORTED_100baseT_Full;
-	if (val & BMSR_100HALF)
-		features |= SUPPORTED_100baseT_Half;
-	if (val & BMSR_10FULL)
-		features |= SUPPORTED_10baseT_Full;
-	if (val & BMSR_10HALF)
-		features |= SUPPORTED_10baseT_Half;
-
-	if (val & BMSR_ESTATEN) {
-		val = phy_read(phydev, MII_ESTATUS);
-		if (val < 0)
-			return val;
-
-		if (val & ESTATUS_1000_TFULL)
-			features |= SUPPORTED_1000baseT_Full;
-		if (val & ESTATUS_1000_THALF)
-			features |= SUPPORTED_1000baseT_Half;
-	}
-
-	phydev->supported &= features;
-	phydev->advertising &= features;
-
-	return 0;
-}
-#endif
-
 int sf1240_config_init(struct phy_device *phydev)
 {
 	int ret;
-
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
-		ret = genphy_config_init(phydev);
-#else
 		ret = genphy_read_abilities(phydev);
-#endif
 	if (ret < 0)
 		return ret;
 
-
-#if (KERNEL_VERSION(5, 0, 0) > LINUX_VERSION_CODE)
-		phydev->supported |= SUPPORTED_1000baseT_Full;
-		phydev->advertising |= SUPPORTED_1000baseT_Full;
-#else
-		linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
-				phydev->supported, ESTATUS_1000_TFULL);
-		linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
-				phydev->advertising, ESTATUS_1000_TFULL);
-#endif
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+			phydev->supported, ESTATUS_1000_TFULL);
+	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+			phydev->advertising, ESTATUS_1000_TFULL);
 	return sf1240_led_init(phydev);
 }
 
@@ -1000,34 +879,19 @@ int sf1211f_config_init(struct phy_device *phydev)
 
 	if (phymode == SFPHY_PORT_TYPE_UTP || phymode == SFPHY_PORT_TYPE_COMBO) {
 		siflower_phy_select_reg_page(phydev, SFPHY_REG_UTP_SPACE);
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
-		ret = genphy_config_init(phydev);
-#else
 		ret = genphy_read_abilities(phydev);
-#endif
 		if (ret < 0)
 			return ret;
 	} else {
 		siflower_phy_select_reg_page(phydev, SFPHY_REG_FIBER_SPACE);
-#if (KERNEL_VERSION(5, 4, 0) > LINUX_VERSION_CODE)
-		ret = genphy_config_init(phydev);
-		if (ret < 0)
-			return ret;
-#else
 		ret = genphy_read_abilities(phydev);
 		if (ret < 0)
 			return ret;
-#endif
 
-#if (KERNEL_VERSION(5, 0, 0) > LINUX_VERSION_CODE)
-		phydev->supported |= SUPPORTED_1000baseT_Full;
-		phydev->advertising |= SUPPORTED_1000baseT_Full;
-#else
 		linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
 				phydev->supported, ESTATUS_1000_TFULL);
 		linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
 				phydev->advertising, ESTATUS_1000_TFULL);
-#endif
 	}
 
 	ret = sf1211f_rxc_txc_init(phydev);
@@ -1063,13 +927,9 @@ static struct phy_driver sf_phy_drivers[] = {
 		.flags              = PHY_POLL,
 		.config_init        = sf1211f_config_init,
 		.config_aneg        = sf1211f_config_aneg,
-#if (KERNEL_VERSION(3, 14, 79) < LINUX_VERSION_CODE)
 		.aneg_done          = sf1211f_aneg_done,
-#endif
-#if (KERNEL_VERSION(4, 12, 0) <= LINUX_VERSION_CODE)
 		.write_mmd          = genphy_write_mmd_unsupported,
 		.read_mmd           = genphy_read_mmd_unsupported,
-#endif
 		.suspend            = genphy_suspend,
 		.resume             = genphy_resume,
 #if SIFLOWER_PHY_WOL_FEATURE_ENABLE
@@ -1086,60 +946,15 @@ static struct phy_driver sf_phy_drivers[] = {
 		.flags              = PHY_POLL,
 		.config_init        = sf1240_config_init,
 		.config_aneg        = genphy_config_aneg,
-#if (KERNEL_VERSION(4, 12, 0) <= LINUX_VERSION_CODE)
 		.write_mmd          = genphy_write_mmd_unsupported,
 		.read_mmd           = genphy_read_mmd_unsupported,
-#endif
 		.suspend            = genphy_suspend,
 		.resume             = genphy_resume,
 	},
 };
 
-#if (KERNEL_VERSION(4, 0, 0) > LINUX_VERSION_CODE)
-static int sf_phy_drivers_register(struct phy_driver *phy_drvs, int size)
-{
-	int i, j;
-	int ret;
-
-	for (i = 0; i < size; i++) {
-		ret = phy_driver_register(&phy_drvs[i]);
-		if (ret)
-			goto err;
-	}
-
-	return 0;
-
-err:
-		for (j = 0; j < i; j++)
-			phy_driver_unregister(&phy_drvs[j]);
-
-	return ret;
-}
-
-static void sf_phy_drivers_unregister(struct phy_driver *phy_drvs, int size)
-{
-	int i;
-
-	for (i = 0; i < size; i++)
-		phy_driver_unregister(&phy_drvs[i]);
-}
-
-static int __init sf_phy_init(void)
-{
-	return sf_phy_drivers_register(sf_phy_drivers, ARRAY_SIZE(sf_phy_drivers));
-}
-
-static void __exit sf_phy_exit(void)
-{
-	sf_phy_drivers_unregister(sf_phy_drivers, ARRAY_SIZE(sf_phy_drivers));
-}
-
-module_init(sf_phy_init);
-module_exit(sf_phy_exit);
-#else
 /* for linux 4.x */
 module_phy_driver(sf_phy_drivers);
-#endif
 
 static struct mdio_device_id __maybe_unused siflower_phy_tbl[] = {
 	{ SF1211F_PHY_ID, SIFLOWER_PHY_ID_MASK },
