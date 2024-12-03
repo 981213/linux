@@ -21,17 +21,8 @@
 #define SIFLOWER_PHY_TXC_DELAY_VAL                              0x40
 #define SIFLOWER_PHY_CLK_OUT_125M_ENABLE                        1
 
-#define SFPHY_GLB_DISABLE                                      0
-#define SFPHY_GLB_ENABLE                                       1
-#define SFPHY_LINK_DOWN                                        0
-#define SFPHY_LINK_UP                                          1
-/* Mask used for ID comparisons */
-#define SIFLOWER_PHY_ID_MASK                                    0xffffffff
-
-/* SF1211F PHY IDs */
 #define SF1211F_PHY_ID                                          0xADB40412
-/* SF1240 PHY IDs */
-#define SF1240_PHY_ID                                          0xADB40411
+#define SF23P1240_PHY_ID                                          0xADB40411
 
 /* SF1211F PHY LED */
 #define SF1211F_EXTREG_LED0                                     0x1E33   // 0
@@ -65,19 +56,6 @@
 #define SIFLOWER_MAGIC_PACKET_PASSWD_ADDR                       0x022F
 #define SIFLOWER_PHY_WOL_PULSE_MODE_SET                         0x062a
 
-/* Magic Packet MAC Passwd Val*/
-#define SIFLOWER_MAGIC_PACKET_PASSWD1                            0x11
-#define SIFLOWER_MAGIC_PACKET_PASSWD2                            0x22
-#define SIFLOWER_MAGIC_PACKET_PASSWD3                            0x33
-#define SIFLOWER_MAGIC_PACKET_PASSWD4                            0x44
-#define SIFLOWER_MAGIC_PACKET_PASSWD5                            0x55
-#define SIFLOWER_MAGIC_PACKET_PASSWD6                            0x66
-
-/* Siflower wol config register */
-#define SIFLOWER_WOL_CFG_REG0                                   0x0220
-#define SIFLOWER_WOL_CFG_REG1                                   0x0221
-#define SIFLOWER_WOL_CFG_REG2                                   0x0222
-#define SIFLOWER_WOL_STA_REG                                    0x0223
 /* 8 PHY MODE */
 #define SF1211F_EXTREG_PHY_MODE_UTP_TO_RGMII                    0x00
 #define SF1211F_EXTREG_PHY_MODE_FIBER_TO_RGMII                  0x10
@@ -111,25 +89,13 @@
 
 /* Interrupt Enable Register */
 #define SIFLOWER_INTR_REG                                       0x0017
-/* WOL TYPE */
-#define SIFLOWER_WOL_TYPE                                       BIT(0)
-/* WOL Pulse Width */
-#define SIFLOWER_WOL_WIDTH1                                     BIT(1)
-#define SIFLOWER_WOL_WIDTH2                                     BIT(2)
-/* WOL dest addr check enable */
-#define SIFLOWER_WOL_SECURE_CHECK                               BIT(5)
-/* WOL crc check enable */
-#define SIFLOWER_WOL_CRC_CHECK                                  BIT(4)
-/* WOL dest addr check enable */
-#define SIFLOWER_WOL_DESTADDR_CHECK                             BIT(5)
-/* WOL Event Interrupt Enable */
-#define SIFLOWER_WOL_INTR_EN                                    BIT(2)
-/* WOL Enable */
-#define SIFLOWER_WOL_EN                                         BIT(7)
 
-#define SIFLOWER_WOL_RESTARTANEG                                BIT(9)
 /* GET PHY MODE */
 #define SFPHY_MODE_CURR                                        sfphy_get_port_type(phydev)
+
+#define SF23P1240_PHY_ADDR_REG		0x1f
+#define  SF23P1240_BROADCAST_ADDR	GENMASK(12, 8)
+#define  SF23P1240_ADDR_OFFSET		GENMASK(4, 0)
 
 enum siflower_port_type_e
 {
@@ -138,31 +104,6 @@ enum siflower_port_type_e
 	SFPHY_PORT_TYPE_COMBO,
 	SFPHY_PORT_TYPE_EXT
 };
-enum siflower_wol_type_e
-{
-	SFPHY_WOL_TYPE_LEVEL,
-	SFPHY_WOL_TYPE_PULSE,
-	SFPHY_WOL_TYPE_EXT
-};
-
-enum siflower_wol_width_e
-{
-	SFPHY_WOL_WIDTH_84MS,
-	SFPHY_WOL_WIDTH_168MS,
-	SFPHY_WOL_WIDTH_336MS,
-	SFPHY_WOL_WIDTH_672MS,
-	SFPHY_WOL_WIDTH_EXT
-};
-
-typedef struct siflower_wol_cfg_s
-{
-	int wolen;
-	int type;
-	int width;
-	int secure;
-	int checkcrc;
-	int checkdst;
-}siflower_wol_cfg_t;
 
 static int sf1211f_phy_ext_read(struct phy_device *phydev, u32 regnum)
 {
@@ -676,13 +617,25 @@ static int phy_mode_set(struct phy_device *phydev, u16 phyMode)
 }
 #endif
 
-int sf1240_config_init(struct phy_device *phydev)
+static int sf23p1240_probe(struct phy_device *phydev)
+{
+	u16 val, phy_offs;
+	val = phy_read(phydev, SF23P1240_PHY_ADDR_REG);
+	phy_offs = FIELD_GET(SF23P1240_ADDR_OFFSET, val);
+	val = phy_read(phydev, MII_BMSR);
+	printk("PHY addr %u offs %u base %u BMSR %04x\n", phydev->mdio.addr, phy_offs,  phydev->mdio.addr - phy_offs, val);
+	
+	return 0;
+}
+
+int sf23p1240_config_init(struct phy_device *phydev)
 {
 	int ret;
 		ret = genphy_read_abilities(phydev);
 	if (ret < 0)
 		return ret;
 
+	/* Datasheet says this chip doesn't support MII_ESTATUS. */
 	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
 			phydev->supported, ESTATUS_1000_TFULL);
 	linkmode_mod_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
@@ -738,29 +691,30 @@ int sf1211f_config_init(struct phy_device *phydev)
 static struct phy_driver sf_phy_drivers[] = {
 	{
 		PHY_ID_MATCH_EXACT(SF1211F_PHY_ID),
-		.name               = "SF1211F Gigabit Ethernet",
-		.features           = PHY_GBIT_FEATURES,
-		.flags              = PHY_POLL,
-		.config_init        = sf1211f_config_init,
-		.config_aneg        = sf1211f_config_aneg,
-		.aneg_done          = sf1211f_aneg_done,
-		.write_mmd          = genphy_write_mmd_unsupported,
-		.read_mmd           = genphy_read_mmd_unsupported,
-		.suspend            = genphy_suspend,
-		.resume             = genphy_resume,
+		.name =		"SF1211F Gigabit Ethernet",
+		.features =	PHY_GBIT_FEATURES,
+		.flags =	PHY_POLL,
+		.config_init =	sf1211f_config_init,
+		.config_aneg =	sf1211f_config_aneg,
+		.aneg_done =	sf1211f_aneg_done,
+		.write_mmd =	genphy_write_mmd_unsupported,
+		.read_mmd =	genphy_read_mmd_unsupported,
+		.suspend =	genphy_suspend,
+		.resume =	genphy_resume,
 	},
 
 	{
-		PHY_ID_MATCH_EXACT(SF1240_PHY_ID),
-		.name               = "SF1240 Gigabit Ethernet",
-		.features           = PHY_GBIT_FEATURES,
-		.flags              = PHY_POLL,
-		.config_init        = sf1240_config_init,
-		.config_aneg        = genphy_config_aneg,
-		.write_mmd          = genphy_write_mmd_unsupported,
-		.read_mmd           = genphy_read_mmd_unsupported,
-		.suspend            = genphy_suspend,
-		.resume             = genphy_resume,
+		PHY_ID_MATCH_EXACT(SF23P1240_PHY_ID),
+		.name =		"SF23P1240 Gigabit Ethernet",
+		.features =	PHY_GBIT_FEATURES,
+		.flags =	PHY_POLL,
+		.config_init =	sf23p1240_config_init,
+		.config_aneg =	genphy_config_aneg,
+		.probe =	sf23p1240_probe,
+		.write_mmd =	genphy_write_mmd_unsupported,
+		.read_mmd =	genphy_read_mmd_unsupported,
+		.suspend =	genphy_suspend,
+		.resume =	genphy_resume,
 	},
 };
 
@@ -768,7 +722,7 @@ module_phy_driver(sf_phy_drivers);
 
 static struct mdio_device_id __maybe_unused siflower_phy_tbl[] = {
 	{ PHY_ID_MATCH_EXACT(SF1211F_PHY_ID) },
-	{ PHY_ID_MATCH_EXACT(SF1240_PHY_ID) },
+	{ PHY_ID_MATCH_EXACT(SF23P1240_PHY_ID) },
 	{},
 };
 
