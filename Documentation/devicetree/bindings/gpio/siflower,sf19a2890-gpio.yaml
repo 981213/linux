@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: (GPL-2.0 OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/gpio/siflower,sf19a2890-gpio.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Siflower SF19A2890 GPIO controller
+
+maintainers:
+  - Chuanhong Guo <gch981213@gmail.com>
+
+properties:
+  compatible:
+    const: siflower,sf19a2890-gpio
+
+  gpio-controller: true
+  "#gpio-cells":
+    const: 2
+
+  gpio-ranges: true
+
+  reg:
+    maxItems: 1
+
+  interrupts:
+    description:
+      Interrupt mapping, one interrupt per 16 GPIOs.
+    minItems: 1
+    maxItems: 10
+
+  clocks:
+    maxItems: 1
+
+  resets:
+    maxItems: 1
+
+  interrupt-controller: true
+
+  "#interrupt-cells":
+    const: 2
+
+  ngpios:
+    description:
+      The number of GPIOs available on the controller implementation.
+    minimum: 1
+
+required:
+  - compatible
+  - clocks
+  - gpio-controller
+  - gpio-ranges
+  - interrupt-controller
+  - interrupts
+  - ngpios
+  - reg
+  - resets
+  - "#gpio-cells"
+  - "#interrupt-cells"
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/interrupt-controller/irq.h>
+    #include <dt-bindings/interrupt-controller/mips-gic.h>
+    gpio@19d00000 {
+      compatible = "siflower,sf19a2890-gpio";
+      reg = <0x19d00000 0x100000>;
+      interrupts = <GIC_SHARED 246 IRQ_TYPE_LEVEL_HIGH>,
+        <GIC_SHARED 247 IRQ_TYPE_LEVEL_HIGH>,
+        <GIC_SHARED 248 IRQ_TYPE_LEVEL_HIGH>,
+        <GIC_SHARED 249 IRQ_TYPE_LEVEL_HIGH>;
+      clocks = <&gpioclk 0>;
+      resets = <&gpiorst 0>;
+
+      gpio-controller;
+      #gpio-cells = <2>;
+      ngpios = <49>;
+      gpio-ranges = <&pinctrl 0 0 49>;
+
+      interrupt-controller;
+      #interrupt-cells = <2>;
+    };
