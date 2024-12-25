@@ -250,7 +250,7 @@
 
 		gpio: gpio@19d00000 {
 			compatible = "siflower,sf19a2890-gpio";
-			reg=<0x19d00000 0x100000>;
+			reg = <0x19d00000 0x100000>;
 			interrupts = <GIC_SHARED 246 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SHARED 247 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SHARED 248 IRQ_TYPE_LEVEL_HIGH>,
