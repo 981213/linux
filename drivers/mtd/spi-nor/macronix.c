@@ -48,6 +48,7 @@ static const struct flash_info macronix_nor_parts[] = {
 	{ "mx25l3255e",  INFO(0xc29e16, 0, 64 * 1024,  64)
 		NO_SFDP_FLAGS(SECT_4K) },
 	{ "mx25l6405d",  INFO(0xc22017, 0, 64 * 1024, 128)
+		FLAGS(SPI_NOR_HAS_LOCK | SPI_NOR_4BIT_BP)
 		NO_SFDP_FLAGS(SECT_4K) },
 	{ "mx25u2033e",  INFO(0xc22532, 0, 64 * 1024,   4)
 		NO_SFDP_FLAGS(SECT_4K) },
@@ -114,6 +115,8 @@ static int macronix_nor_late_init(struct spi_nor *nor)
 {
 	if (!nor->params->set_4byte_addr_mode)
 		nor->params->set_4byte_addr_mode = spi_nor_set_4byte_addr_mode_en4b_ex4b;
+	nor->flags &= ~SNOR_F_HAS_16BIT_SR;
+	nor->flags |= SNOR_F_HAS_LOCK;
 
 	return 0;
 }

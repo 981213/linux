@@ -80,11 +80,13 @@ struct partition_meta_info {
  * ``GENHD_FL_NO_PART``: partition support is disabled.  The kernel will not
  * scan for partitions from add_disk, and users can't add partitions manually.
  *
+ * ``GENHD_FL_NVMEM``: the block device should be considered as NVMEM provider.
  */
 enum {
 	GENHD_FL_REMOVABLE			= 1 << 0,
 	GENHD_FL_HIDDEN				= 1 << 1,
 	GENHD_FL_NO_PART			= 1 << 2,
+	GENHD_FL_NVMEM				= 1 << 3,
 };
 
 enum {
@@ -741,6 +743,9 @@ static inline unsigned int blk_queue_depth(struct request_queue *q)
 #define for_each_bio(_bio)		\
 	for (; _bio; _bio = _bio->bi_next)
 
+int __must_check add_disk_fwnode(struct device *parent, struct gendisk *disk,
+				 const struct attribute_group **groups,
+				 struct fwnode_handle *fwnode);
 int __must_check device_add_disk(struct device *parent, struct gendisk *disk,
 				 const struct attribute_group **groups);
 static inline int __must_check add_disk(struct gendisk *disk)
@@ -1563,5 +1568,16 @@ struct io_comp_batch {
 };
 
 #define DEFINE_IO_COMP_BATCH(name)	struct io_comp_batch name = { }
+
+
+#define BLK_DEVICE_ADD		1
+#define BLK_DEVICE_REMOVE	2
+#if defined(CONFIG_BLOCK_NOTIFIERS)
+void blk_register_notify(struct notifier_block *nb);
+void blk_unregister_notify(struct notifier_block *nb);
+#else
+static inline void blk_register_notify(struct notifier_block *nb) { };
+static inline void blk_unregister_notify(struct notifier_block *nb) { };
+#endif
 
 #endif /* _LINUX_BLKDEV_H */

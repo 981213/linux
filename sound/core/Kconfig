@@ -17,7 +17,7 @@ config SND_DMAENGINE_PCM
 	tristate
 
 config SND_HWDEP
-	tristate
+	tristate "Sound hardware support"
 
 config SND_SEQ_DEVICE
 	tristate
@@ -40,7 +40,7 @@ config SND_UMP_LEGACY_RAWMIDI
 	  The device contains 16 substreams corresponding to UMP groups.
 
 config SND_COMPRESS_OFFLOAD
-	tristate
+	tristate "Compression offloading support"
 
 config SND_JACK
 	bool

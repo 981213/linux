@@ -59,7 +59,7 @@ static ssize_t vol_attribute_show(struct device *dev,
 	struct ubi_device *ubi = vol->ubi;
 
 	spin_lock(&ubi->volumes_lock);
-	if (!ubi->volumes[vol->vol_id]) {
+	if (!ubi->volumes[vol->vol_id] || ubi->volumes[vol->vol_id]->is_dead) {
 		spin_unlock(&ubi->volumes_lock);
 		return -ENODEV;
 	}
@@ -122,6 +122,31 @@ static void vol_release(struct device *dev)
 	ubi_eba_replace_table(vol, NULL);
 	ubi_fastmap_destroy_checkmap(vol);
 	kfree(vol);
+}
+
+static struct fwnode_handle *find_volume_fwnode(struct ubi_volume *vol)
+{
+	struct fwnode_handle *fw_vols, *fw_vol;
+	const char *volname;
+	u32 volid;
+
+	fw_vols = device_get_named_child_node(vol->dev.parent->parent, "volumes");
+	if (!fw_vols)
+		return NULL;
+
+	fwnode_for_each_child_node(fw_vols, fw_vol) {
+		if (!fwnode_property_read_string(fw_vol, "volname", &volname) &&
+		    strncmp(volname, vol->name, vol->name_len))
+			continue;
+
+		if (!fwnode_property_read_u32(fw_vol, "volid", &volid) &&
+		    vol->vol_id != volid)
+			continue;
+
+		return fw_vol;
+	}
+
+	return NULL;
 }
 
 /**
@@ -189,7 +214,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 
 	/* Ensure that the name is unique */
 	for (i = 0; i < ubi->vtbl_slots; i++)
-		if (ubi->volumes[i] &&
+		if (ubi->volumes[i] && !ubi->volumes[i]->is_dead &&
 		    ubi->volumes[i]->name_len == req->name_len &&
 		    !strcmp(ubi->volumes[i]->name, req->name)) {
 			ubi_err(ubi, "volume \"%s\" exists (ID %d)",
@@ -223,6 +248,7 @@ int ubi_create_volume(struct ubi_device *ubi, struct ubi_mkvol_req *req)
 	vol->name_len  = req->name_len;
 	memcpy(vol->name, req->name, vol->name_len);
 	vol->ubi = ubi;
+	device_set_node(&vol->dev, find_volume_fwnode(vol));
 
 	/*
 	 * Finish all pending erases because there may be some LEBs belonging
@@ -352,6 +378,19 @@ int ubi_remove_volume(struct ubi_volume_desc *desc, int no_vtbl)
 		err = -EBUSY;
 		goto out_unlock;
 	}
+
+	/*
+	 * Mark volume as dead at this point to prevent that anyone
+	 * can take a reference to the volume from now on.
+	 * This is necessary as we have to release the spinlock before
+	 * calling ubi_volume_notify.
+	 */
+	vol->is_dead = true;
+	spin_unlock(&ubi->volumes_lock);
+
+	ubi_volume_notify(ubi, vol, UBI_VOLUME_SHUTDOWN);
+
+	spin_lock(&ubi->volumes_lock);
 	ubi->volumes[vol_id] = NULL;
 	spin_unlock(&ubi->volumes_lock);
 
@@ -592,6 +631,7 @@ int ubi_add_volume(struct ubi_device *ubi, struct ubi_volume *vol)
 	vol->dev.class = &ubi_class;
 	vol->dev.groups = volume_dev_groups;
 	dev_set_name(&vol->dev, "%s_%d", ubi->ubi_name, vol->vol_id);
+	device_set_node(&vol->dev, find_volume_fwnode(vol));
 	err = device_register(&vol->dev);
 	if (err) {
 		cdev_del(&vol->cdev);

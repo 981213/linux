@@ -345,6 +345,7 @@ struct ubi_volume {
 	int writers;
 	int exclusive;
 	int metaonly;
+	bool is_dead;
 
 	int reserved_pebs;
 	int vol_type;
@@ -564,6 +565,7 @@ struct ubi_device {
 	spinlock_t volumes_lock;
 	int ref_count;
 	int image_seq;
+	bool is_dead;
 
 	int rsvd_pebs;
 	int avail_pebs;
@@ -778,6 +780,7 @@ struct ubi_attach_info {
 	int mean_ec;
 	uint64_t ec_sum;
 	int ec_count;
+	bool eof_found;
 	struct kmem_cache *aeb_slab_cache;
 	struct ubi_ec_hdr *ech;
 	struct ubi_vid_io_buf *vidb;
@@ -956,6 +959,7 @@ void ubi_free_internal_volumes(struct ubi_device *ubi);
 void ubi_do_get_device_info(struct ubi_device *ubi, struct ubi_device_info *di);
 void ubi_do_get_volume_info(struct ubi_device *ubi, struct ubi_volume *vol,
 			    struct ubi_volume_info *vi);
+int ubi_get_num_by_path(const char *pathname, int *ubi_num, int *vol_id);
 /* scan.c */
 int ubi_compare_lebs(struct ubi_device *ubi, const struct ubi_ainf_peb *aeb,
 		      int pnum, const struct ubi_vid_hdr *vid_hdr);
