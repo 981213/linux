@@ -495,8 +495,8 @@ static int xgmac_dma_init(struct xgmac_dma_priv *priv)
 	reg_write(priv, XGMAC_TX_EDMA_CTRL, 1);
 	reg_write(priv, XGMAC_RX_EDMA_CTRL, 1);
 
-	/* enable rx_queue 0 1 2 3 4 */
-	regmap_write(priv->ethsys, ETHSYS_RX_QUEUE_ENABLE, 0x2AA);
+	/* enable rx_queue 0 1 2 3 */
+	regmap_write(priv->ethsys, ETHSYS_RX_QUEUE_ENABLE, 0xAA);
 
 	/* Use static RX Queue to DMA mapping
 	 * queue 0 to channel 0
@@ -508,12 +508,8 @@ static int xgmac_dma_init(struct xgmac_dma_priv *priv)
 	reg_write(priv, XGMAC_MTL_RXQ_DMA_MAP0, 0x03020100);
 	reg_write(priv, XGMAC_MTL_RXQ_DMA_MAP1, 0x4);
 
-
 	/* DMA Channel Configuration
-	 * all 0~4 TXQs share 8KB
-	 * 0~1-> 3KB for TX/RX
-	 * 2~3-> disabled
-	 * 4 -> 2KB for TX/RX
+	 * TXQs share 8KB, RXQs share 16KB
 	 *
 	 * Configured queue size = 256B * (1 + (TQS or RQS field))
 	 *
@@ -531,30 +527,17 @@ static int xgmac_dma_init(struct xgmac_dma_priv *priv)
 			FIELD_PREP(XGMAC_TxPBL, 16) | XGMAC_TSE | XGMAC_OSP);
 
 		/* Enable TX queue, store-and-forward mode
-		 * queue 0/1/2/3 size 1.5k bytes
-		 * queue 4 size 2k bytes
+		 * each queue size 2k bytes
 		 */
-		if (i == 4) {
-			reg_rmw(priv, XGMAC_MTL_TXQ_OPMODE(i), XGMAC_TQS | XGMAC_TXQEN,
-					FIELD_PREP(XGMAC_TQS, 0x7) | XGMAC_TSF |
-					FIELD_PREP(XGMAC_TXQEN, 0x2));
-		}else {
-			reg_rmw(priv, XGMAC_MTL_TXQ_OPMODE(i), XGMAC_TQS | XGMAC_TXQEN,
-					FIELD_PREP(XGMAC_TQS, 0x5) | XGMAC_TSF |
-					FIELD_PREP(XGMAC_TXQEN, 0x2));
-		}
+		reg_rmw(priv, XGMAC_MTL_TXQ_OPMODE(i), XGMAC_TQS | XGMAC_TXQEN,
+			FIELD_PREP(XGMAC_TQS, 0x7) | XGMAC_TSF |
+				FIELD_PREP(XGMAC_TXQEN, 0x2));
 
 		/* Enable RX queue
-		 * queue 0/1/2/3 size 3k bytes
-		 * queue 4 size 4k bytes
+		 * each queue size 4k bytes
 		 */
-		if (i == 4) {
-			reg_write(priv, XGMAC_MTL_RXQ_OPMODE(i),
-					FIELD_PREP(XGMAC_RQS, 0xf));
-		}else {
-			reg_write(priv, XGMAC_MTL_RXQ_OPMODE(i),
-					FIELD_PREP(XGMAC_RQS, 0xa));
-		}
+		reg_write(priv, XGMAC_MTL_RXQ_OPMODE(i),
+			  FIELD_PREP(XGMAC_RQS, 0xf));
 	}
 
 	return 0;
