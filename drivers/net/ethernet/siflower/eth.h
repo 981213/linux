@@ -10,8 +10,6 @@
 #include <linux/bitops.h>
 #include <linux/netdevice.h>
 
-#define FPGA
-
 struct phylink_pcs *xpcs_port_get(struct platform_device *, unsigned int);
 void xpcs_port_put(struct platform_device *);
 
