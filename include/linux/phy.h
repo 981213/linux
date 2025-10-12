@@ -874,8 +874,9 @@ struct phy_plca_status {
 
 /* Modes for PHY LED configuration */
 enum phy_led_modes {
-	PHY_LED_ACTIVE_LOW = 0,
-	PHY_LED_INACTIVE_HIGH_IMPEDANCE = 1,
+	PHY_LED_ACTIVE_HIGH = 0,
+	PHY_LED_ACTIVE_LOW = 1,
+	PHY_LED_INACTIVE_HIGH_IMPEDANCE = 2,
 
 	/* keep it last */
 	__PHY_LED_MODES_NUM,
@@ -995,6 +996,12 @@ struct phy_driver {
 	/** @handle_interrupt: Override default interrupt handling */
 	irqreturn_t (*handle_interrupt)(struct phy_device *phydev);
 
+	/*
+	 * Called before an ethernet device is detached
+	 * from the PHY.
+	 */
+	void (*detach)(struct phy_device *phydev);
+
 	/** @remove: Clears up any memory if needed */
 	void (*remove)(struct phy_device *phydev);
 
@@ -1003,7 +1010,8 @@ struct phy_driver {
 	 * driver for the given phydev.	 If NULL, matching is based on
 	 * phy_id and phy_id_mask.
 	 */
-	int (*match_phy_device)(struct phy_device *phydev);
+	int (*match_phy_device)(struct phy_device *phydev,
+				const struct phy_driver *phydrv);
 
 	/**
 	 * @set_wol: Some devices (e.g. qnap TS-119P II) require PHY
@@ -1903,6 +1911,9 @@ void phy_attached_print(struct phy_device *phydev, const char *fmt, ...)
 char *phy_attached_info_irq(struct phy_device *phydev)
 	__malloc;
 void phy_attached_info(struct phy_device *phydev);
+
+int genphy_match_phy_device(struct phy_device *phydev,
+			    const struct phy_driver *phydrv);
 
 /* Clause 22 PHY */
 int genphy_read_abilities(struct phy_device *phydev);

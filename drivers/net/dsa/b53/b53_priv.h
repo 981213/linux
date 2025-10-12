@@ -66,6 +66,7 @@ enum {
 	BCM5395_DEVICE_ID = 0x95,
 	BCM5397_DEVICE_ID = 0x97,
 	BCM5398_DEVICE_ID = 0x98,
+	BCM53101_DEVICE_ID = 0x53101,
 	BCM53115_DEVICE_ID = 0x53115,
 	BCM53125_DEVICE_ID = 0x53125,
 	BCM53128_DEVICE_ID = 0x53128,
@@ -81,6 +82,12 @@ enum {
 	BCM7445_DEVICE_ID = 0x7445,
 	BCM7278_DEVICE_ID = 0x7278,
 	BCM53134_DEVICE_ID = 0x5075,
+};
+
+enum b53_variant_id {
+	B53_VARIANT_NONE = 0,
+	B53_VARIANT_5325E,
+	B53_VARIANT_5325M,
 };
 
 struct b53_pcs {
@@ -117,6 +124,7 @@ struct b53_device {
 
 	/* chip specific data */
 	u32 chip_id;
+	enum b53_variant_id variant_id;
 	u8 core_rev;
 	u8 vta_regs[3];
 	u8 duplex_reg;
@@ -164,6 +172,18 @@ static inline int is5325(struct b53_device *dev)
 	return dev->chip_id == BCM5325_DEVICE_ID;
 }
 
+static inline int is5325e(struct b53_device *dev)
+{
+	return is5325(dev) &&
+		dev->variant_id == B53_VARIANT_5325E;
+}
+
+static inline int is5325m(struct b53_device *dev)
+{
+	return is5325(dev) &&
+		dev->variant_id == B53_VARIANT_5325M;
+}
+
 static inline int is5365(struct b53_device *dev)
 {
 #ifdef CONFIG_BCM47XX
@@ -190,6 +210,7 @@ static inline int is531x5(struct b53_device *dev)
 {
 	return dev->chip_id == BCM53115_DEVICE_ID ||
 		dev->chip_id == BCM53125_DEVICE_ID ||
+		dev->chip_id == BCM53101_DEVICE_ID ||
 		dev->chip_id == BCM53128_DEVICE_ID ||
 		dev->chip_id == BCM53134_DEVICE_ID;
 }
@@ -296,6 +317,19 @@ static inline void b53_arl_to_entry(struct b53_arl_entry *ent,
 	ent->vid = mac_vid >> ARLTBL_VID_S;
 }
 
+static inline void b53_arl_to_entry_25(struct b53_arl_entry *ent,
+				       u64 mac_vid)
+{
+	memset(ent, 0, sizeof(*ent));
+	ent->port = (mac_vid >> ARLTBL_DATA_PORT_ID_S_25) &
+		     ARLTBL_DATA_PORT_ID_MASK_25;
+	ent->is_valid = !!(mac_vid & ARLTBL_VALID_25);
+	ent->is_age = !!(mac_vid & ARLTBL_AGE_25);
+	ent->is_static = !!(mac_vid & ARLTBL_STATIC_25);
+	u64_to_ether_addr(mac_vid, ent->mac);
+	ent->vid = mac_vid >> ARLTBL_VID_S_65;
+}
+
 static inline void b53_arl_from_entry(u64 *mac_vid, u32 *fwd_entry,
 				      const struct b53_arl_entry *ent)
 {
@@ -308,6 +342,22 @@ static inline void b53_arl_from_entry(u64 *mac_vid, u32 *fwd_entry,
 		*fwd_entry |= ARLTBL_STATIC;
 	if (ent->is_age)
 		*fwd_entry |= ARLTBL_AGE;
+}
+
+static inline void b53_arl_from_entry_25(u64 *mac_vid,
+					 const struct b53_arl_entry *ent)
+{
+	*mac_vid = ether_addr_to_u64(ent->mac);
+	*mac_vid |= (u64)(ent->port & ARLTBL_DATA_PORT_ID_MASK_25) <<
+			  ARLTBL_DATA_PORT_ID_S_25;
+	*mac_vid |= (u64)(ent->vid & ARLTBL_VID_MASK_25) <<
+			  ARLTBL_VID_S_65;
+	if (ent->is_valid)
+		*mac_vid |= ARLTBL_VALID_25;
+	if (ent->is_static)
+		*mac_vid |= ARLTBL_STATIC_25;
+	if (ent->is_age)
+		*mac_vid |= ARLTBL_AGE_25;
 }
 
 #ifdef CONFIG_BCM47XX
@@ -341,6 +391,7 @@ void b53_get_strings(struct dsa_switch *ds, int port, u32 stringset,
 void b53_get_ethtool_stats(struct dsa_switch *ds, int port, uint64_t *data);
 int b53_get_sset_count(struct dsa_switch *ds, int port, int sset);
 void b53_get_ethtool_phy_stats(struct dsa_switch *ds, int port, uint64_t *data);
+int b53_set_ageing_time(struct dsa_switch *ds, unsigned int msecs);
 int b53_br_join(struct dsa_switch *ds, int port, struct dsa_bridge bridge,
 		bool *tx_fwd_offload, struct netlink_ext_ack *extack);
 void b53_br_leave(struct dsa_switch *ds, int port, struct dsa_bridge bridge);
