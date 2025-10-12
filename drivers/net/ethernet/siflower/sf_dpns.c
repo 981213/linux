@@ -5,6 +5,7 @@
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/device.h>
 #include <linux/debugfs.h>
@@ -49,11 +50,10 @@ static int dpns_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int dpns_remove(struct platform_device *pdev) {
+static void dpns_remove(struct platform_device *pdev) {
 	struct dpns_priv *priv = platform_get_drvdata(pdev);
 	debugfs_remove_recursive(priv->debugfs);
 	reset_control_assert(priv->npu_rst);
-	return 0;
 }
 
 static const struct of_device_id dpns_match[] = {

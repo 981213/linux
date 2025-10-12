@@ -3,6 +3,7 @@
 #include <linux/clk.h>
 #include <linux/mfd/syscon.h>
 #include <linux/phylink.h>
+#include <linux/platform_device.h>
 #include <linux/of_platform.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
@@ -592,12 +593,12 @@ static int xpcs_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int xpcs_remove(struct platform_device *pdev)
+static void xpcs_remove(struct platform_device *pdev)
 {
 	struct xpcs_priv *priv = platform_get_drvdata(pdev);
 
 	clk_bulk_disable_unprepare(XPCS_NUM_CLKS, priv->clks);
-	return regmap_clear_bits(priv->ethsys, ETHSYS_RST, BIT(5 + priv->id));
+	regmap_clear_bits(priv->ethsys, ETHSYS_RST, BIT(5 + priv->id));
 }
 
 static const struct of_device_id xpcs_match[] = {

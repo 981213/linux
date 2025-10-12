@@ -2,6 +2,7 @@
 #include <linux/kernel.h>
 #include <linux/interrupt.h>
 #include <linux/etherdevice.h>
+#include <linux/platform_device.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
 #include <linux/of_platform.h>
@@ -676,31 +677,6 @@ static const struct net_device_ops xgmac_netdev_ops = {
 	.ndo_change_mtu		= xgmac_change_mtu,
 };
 
-static void xgmac_validate(struct phylink_config *config,
-			   unsigned long *supported,
-			   struct phylink_link_state *state)
-{
-	__ETHTOOL_DECLARE_LINK_MODE_MASK(mac_supported) = {};
-
-	phylink_set(mac_supported, 10baseT_Half);
-	phylink_set(mac_supported, 10baseT_Full);
-	phylink_set(mac_supported, 100baseT_Half);
-	phylink_set(mac_supported, 100baseT_Full);
-	phylink_set(mac_supported, 1000baseT_Full);
-	phylink_set(mac_supported, 1000baseX_Full);
-	phylink_set(mac_supported, 1000baseKX_Full);
-	phylink_set(mac_supported, 2500baseT_Full);
-	phylink_set(mac_supported, 2500baseX_Full);
-
-	phylink_set(mac_supported, Autoneg);
-	phylink_set(mac_supported, Pause);
-	phylink_set(mac_supported, Asym_Pause);
-	phylink_set_port_modes(mac_supported);
-
-	linkmode_and(supported, supported, mac_supported);
-	linkmode_and(state->advertising, state->advertising, mac_supported);
-}
-
 static struct xgmac_priv *sfxgmac_phylink_to_port(struct phylink_config *config)
 {
 	return container_of(config, struct xgmac_priv, phylink_config);
@@ -875,7 +851,6 @@ static void xgmac_mac_link_up(struct phylink_config *config,
 }
 
 static const struct phylink_mac_ops xgmac_phylink_mac_ops = {
-	.validate	= xgmac_validate,
 	.mac_select_pcs = xgmac_mac_selct_pcs,
 	.mac_config	= xgmac_mac_config,
 	.mac_link_down	= xgmac_mac_link_down,
@@ -980,7 +955,7 @@ static int xgmac_ethtool_get_link_ksettings(struct net_device *dev,
 	return phylink_ethtool_ksettings_get(priv->phylink, cmd);
 }
 
-static int xgmac_ethtool_get_eee(struct net_device *dev, struct ethtool_eee *e)
+static int xgmac_ethtool_get_eee(struct net_device *dev, struct ethtool_keee *e)
 {
 	struct xgmac_priv *priv = netdev_priv(dev);
 	int ret;
@@ -995,7 +970,7 @@ static int xgmac_ethtool_get_eee(struct net_device *dev, struct ethtool_eee *e)
 	return 0;
 }
 
-static int xgmac_ethtool_set_eee(struct net_device *dev, struct ethtool_eee *e)
+static int xgmac_ethtool_set_eee(struct net_device *dev, struct ethtool_keee *e)
 {
 	struct xgmac_priv *priv = netdev_priv(dev);
 	int ret;
@@ -1221,9 +1196,10 @@ static int xgmac_probe(struct platform_device *pdev)
 	ndev->netdev_ops = &xgmac_netdev_ops;
 	ndev->ethtool_ops = &xgmac_ethtool_ops;
 	ndev->features = NETIF_F_RXHASH | NETIF_F_RXCSUM | NETIF_F_GRO |
-			 NETIF_F_SG | NETIF_F_LLTX | NETIF_F_HW_TC |
+			 NETIF_F_SG | NETIF_F_HW_TC |
 			 NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM | NETIF_F_TSO |
 			 NETIF_F_TSO6;
+	ndev->lltx = true;
 	ndev->hw_features = (ndev->features & ~NETIF_F_RXHASH) |
 			    NETIF_F_LOOPBACK | NETIF_F_RXFCS | NETIF_F_RXALL |
 			    NETIF_F_HW_L2FW_DOFFLOAD;
@@ -1311,7 +1287,7 @@ MODULE_DEVICE_TABLE(of, xgmac_match);
 
 static struct platform_driver xgmac_driver = {
 	.probe	= xgmac_probe,
-	.remove_new	= xgmac_remove,
+	.remove	= xgmac_remove,
 	.driver	= {
 		.name		= "sfxgmac",
 		.of_match_table	= xgmac_match,
