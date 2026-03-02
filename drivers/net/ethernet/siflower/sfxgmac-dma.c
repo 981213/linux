@@ -12,6 +12,14 @@
 #include "dma.h"
 #include "eth.h"
 
+/* Dummy netdev initialization for NAPI */
+static void sfxgmac_init_dummy_netdev(struct net_device *dev)
+{
+	dev->reg_state = NETREG_DUMMY;
+	set_bit(__LINK_STATE_PRESENT, &dev->state);
+	set_bit(__LINK_STATE_START, &dev->state);
+}
+
 struct xgmac_dma_desc_rx {
 	struct xgmac_dma_desc norm;
 	struct xgmac_dma_desc ctxt;
@@ -1472,7 +1480,7 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 	/* we run multiple netdevs on the same DMA ring so we need a dummy
 	 * device for NAPI to work
 	 */
-	init_dummy_netdev(&priv->napi_dev);
+	sfxgmac_init_dummy_netdev(&priv->napi_dev);
 
 	/* DMA IRQ */
 	ret = platform_get_irq_byname(pdev, "sbd");
@@ -1606,7 +1614,7 @@ MODULE_DEVICE_TABLE(of, xgmac_dma_match);
 
 static struct platform_driver xgmac_dma_driver = {
 	.probe	= xgmac_dma_probe,
-	.remove_new	= xgmac_dma_remove,
+	.remove	= xgmac_dma_remove,
 	.driver	= {
 		.name		= "sfxgmac_dma",
 		.of_match_table	= xgmac_dma_match,
