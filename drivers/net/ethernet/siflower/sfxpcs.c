@@ -169,7 +169,7 @@ static void xpcs_8023z_resolve_link(struct xpcs_priv *priv,
 		state->pause |= MLO_PAUSE_RX;
 }
 
-static void xpcs_get_state(struct phylink_pcs *pcs,
+static void xpcs_get_state(struct phylink_pcs *pcs, unsigned int neg_mode,
 			   struct phylink_link_state *state)
 {
 	struct xpcs_port *port;
