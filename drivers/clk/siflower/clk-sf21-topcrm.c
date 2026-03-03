@@ -467,6 +467,7 @@ struct sf21_clk_muxdiv {
 };
 
 #define CRM_CLK_SEL(_x)		((_x) * 4 + 0x80)
+#define  CLK_SEL1_PLL_TEST	GENMASK(6, 4)
 #define CRM_CLK_EN		0x8c
 #define CRM_CLK_DIV(_x)		((_x) * 4 + 0x94)
 #define  CRM_CLK_DIV_MASK	GENMASK(7, 0)
@@ -694,7 +695,44 @@ static const struct clk_ops sf21_clk_div_ops = {
 	}
 
 static SF21_DIV(div_pvt, clk_pll_parents, 3, 8, 0);
-static SF21_DIV(div_pll_test, clk_pll_parents, 3, 24, 0);
+
+static const char *clk_pll_test_parents[] = { "cmnpll_postdiv",
+					      "ddrpll_postdiv",
+					      "pciepll_fout3" };
+
+static u8 sf21_pll_test_get_parent(struct clk_hw *hw)
+{
+	struct sf_clk_common *cmn_priv = hw_to_sf_clk_common(hw);
+	u32 reg_val = sf_readl(cmn_priv, CRM_CLK_SEL(1));
+	return FIELD_GET(CLK_SEL1_PLL_TEST, reg_val);
+}
+
+static int sf21_pll_test_set_parent(struct clk_hw *hw, u8 index)
+{
+	struct sf_clk_common *cmn_priv = hw_to_sf_clk_common(hw);
+	unsigned long flags;
+	spin_lock_irqsave(cmn_priv->lock, flags);
+	sf_rmw(cmn_priv, CRM_CLK_SEL(1), CLK_SEL1_PLL_TEST, FIELD_PREP(CLK_SEL1_PLL_TEST, index));
+	spin_unlock_irqrestore(cmn_priv->lock, flags);
+	return 0;
+}
+
+static const struct clk_ops sf21_clk_pll_test_ops = {
+	.recalc_rate = sf21_muxdiv_recalc_rate,
+	.determine_rate = sf21_muxdiv_determine_rate,
+	.set_rate = sf21_muxdiv_set_rate,
+	.get_parent = sf21_pll_test_get_parent,
+	.set_parent = sf21_pll_test_set_parent,
+};
+
+static struct sf21_clk_muxdiv muxdiv_pll_test = {
+	.common = SF_CLK_COMMON("muxdiv_pll_test", clk_pll_test_parents,
+				&sf21_clk_pll_test_ops, 0),
+	.mux = 0,
+	.en = 0,
+	.div_reg = 3,
+	.div_offs = 24,
+};
 
 static const struct clk_ops sf21_clk_gate_ops = {
 	.enable = sf21_muxdiv_enable,
@@ -750,7 +788,7 @@ static struct clk_hw_onecell_data sf21_hw_clks = {
 		[CLK_IROM] = &muxdiv_irom.common.hw,
 		[CLK_BOOT] = &mux_boot.common.hw,
 		[CLK_PVT] = &div_pvt.common.hw,
-		[CLK_PLL_TEST] = &div_pll_test.common.hw,
+		[CLK_PLL_TEST] = &muxdiv_pll_test.common.hw,
 		[CLK_PCIE_REFN] = &pcie_refclk_n.common.hw,
 		[CLK_PCIE_REFP] = &pcie_refclk_p.common.hw,
 	}
