@@ -9,6 +9,15 @@ menuconfig CLK_SIFLOWER
 
 if CLK_SIFLOWER
 
+config CLK_SF19A2890_PERIPHCRM
+	bool "Clock and reset driver for Siflower SF19A2890 peripheral CRM blocks"
+	depends on ARCH_SIFLOWER || COMPILE_TEST
+	select RESET_CONTROLLER
+	help
+	  Supports the peripheral Clock and Reset Manager (CRM) blocks found
+	  in SF19A2890 and SF21 SoCs. Each CRM block manages clock gating and
+	  reset for a group of APB peripherals.
+
 config CLK_SF21_TOPCRM
 	tristate "Clock driver for Siflower SF21 toplevel clock & reset module"
 	depends on ARCH_SIFLOWER || COMPILE_TEST

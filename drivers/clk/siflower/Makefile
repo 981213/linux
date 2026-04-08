@@ -1,1 +1,2 @@
+obj-$(CONFIG_CLK_SF19A2890_PERIPHCRM) += clk-sf19a2890-periphcrm.o
 obj-$(CONFIG_CLK_SF21_TOPCRM) += clk-sf21-topcrm.o
