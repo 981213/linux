@@ -1,0 +1,155 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/siflower,sf19a2890-periph-crm.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Siflower SF19A2890 Peripheral Clock and Reset Manager
+
+maintainers:
+  - Chuanhong Guo <gch981213@gmail.com>
+
+description: |
+  Each instance of this block manages the clocks and resets for a group of
+  APB peripherals on Siflower SF19A2890 and compatible SoCs.  The block
+  exposes three registers:
+
+    RESET    at base + 0x0  -- per-peripheral reset bitmasks
+    CLK_GATE at base + 0x4  -- one clock-gate bit per managed clock
+    BOE      at base + 0xc  -- shared Bus Output Enable; bits [1:0] must be
+                               set for any peripheral in the block to respond
+                               to bus transactions
+
+  The driver manages BOE automatically: it is asserted when the first clock
+  gate is enabled and deasserted when the last one is disabled.
+
+  Clock consumers reference a gate by its index in the clock-output-names
+  list.  When the valid gate bits are not contiguous the siflower,valid-gates
+  mask must be provided so the driver can map the N-th clock listed in
+  clock-output-names to the correct CLK_GATE bit position.
+
+  Reset consumers reference a reset line by its index in the
+  siflower,reset-masks array.
+
+properties:
+  compatible:
+    const: siflower,sf19a2890-periph-crm
+
+  reg:
+    maxItems: 1
+
+  clocks:
+    description:
+      One parent clock handle per managed clock gate, in the same order as
+      clock-output-names.
+    minItems: 1
+    maxItems: 8
+
+  clock-output-names:
+    description:
+      Name of each managed clock gate.  The N-th entry corresponds to the
+      N-th phandle in the clocks property.  The bit position in CLK_GATE used
+      for each gate is determined by iterating through the bits set in
+      siflower,valid-gates (or assuming a packed layout when that property is
+      absent).
+    minItems: 1
+    maxItems: 8
+
+  "#clock-cells":
+    description:
+      The single cell encodes the zero-based index of the clock gate in
+      clock-output-names.  With siflower,valid-gates present, index N maps to
+      the N-th set bit in that mask.
+    const: 1
+
+  "#reset-cells":
+    description:
+      The single cell encodes the index into the siflower,reset-masks array.
+    const: 1
+
+  siflower,valid-gates:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Bitmask of the CLK_GATE bits that correspond to actual clock gates.
+      Bit N being set means that bit N of CLK_GATE is a valid gate.  The
+      clock-output-names entries are mapped in order to the set bits of this
+      mask (lowest set bit first).  When absent, the gates are assumed to
+      occupy the lowest num_clocks bits of CLK_GATE, i.e. the mask defaults
+      to (1 << num_clocks) - 1.  At most eight gates are supported.
+
+  siflower,critical-gates:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Bitmask of the CLK_GATE bits whose corresponding clocks must never be
+      disabled by the clock framework (CLK_IS_CRITICAL).  The same bit
+      numbering as siflower,valid-gates applies.  When absent, no clock gate
+      is treated as critical.  This is intended for board-level console clocks
+      that may already be in use by firmware or earlycon before their Linux
+      consumer driver probes.  If that consumer probe fails, disabling such a
+      gate can remove the active console clock and hang the system.
+
+  siflower,reset-masks:
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    description:
+      Array of bitmasks, one entry per reset line.  Each bitmask describes
+      the bits in the RESET register that must be written together to assert
+      or deassert that reset.  Exactly one of siflower,reset-masks or
+      siflower,num-resets must be present.
+    minItems: 1
+    maxItems: 32
+
+  siflower,num-resets:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description:
+      Number of reset lines managed by this block when every reset line
+      occupies exactly one bit and the bits are packed starting from bit 0
+      (i.e. reset N uses bit N of the RESET register).  Exactly one of
+      siflower,reset-masks or siflower,num-resets must be present.
+    minimum: 1
+    maximum: 32
+
+required:
+  - compatible
+  - reg
+  - clocks
+  - clock-output-names
+  - "#clock-cells"
+  - "#reset-cells"
+
+oneOf:
+  - required:
+      - siflower,reset-masks
+  - required:
+      - siflower,num-resets
+
+additionalProperties: false
+
+examples:
+  - |
+    /* Simple block: single-bit packed resets, contiguous gates */
+    gpio_crm: periph-crm@ce0a000 {
+        compatible = "siflower,sf19a2890-periph-crm";
+        reg = <0xce0a000 0x10>;
+        clocks = <&topcrm 9>;
+        clock-output-names = "gpio";
+        #clock-cells = <1>;
+        #reset-cells = <1>;
+        siflower,num-resets = <1>;
+    };
+
+  - |
+    /*
+     * UART block: gates at bits 0,1,4,5 of CLK_GATE (non-contiguous),
+     * uart1 gates are critical, resets use multi-bit masks.
+     */
+    uart_crm: periph-crm@ce08c00 {
+        compatible = "siflower,sf19a2890-periph-crm";
+        reg = <0xce08c00 0x10>;
+        clocks = <&topcrm 9>, <&topcrm 9>, <&topcrm 10>, <&topcrm 10>;
+        clock-output-names = "uart0_apb", "uart1_apb", "uart0", "uart1";
+        siflower,valid-gates = <0x33>;
+        siflower,critical-gates = <0x22>;
+        #clock-cells = <1>;
+        #reset-cells = <1>;
+        siflower,reset-masks = <0x11 0x22>;
+    };
