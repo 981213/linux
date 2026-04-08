@@ -16,6 +16,14 @@ config CLK_SF19A2890
 	  kernel is meant to run on a Siflower SF19A2890 SoC,
 	  enable this driver.
 
+config CLK_SF19A2890_PERIPHCRM
+	bool "Clock and reset driver for Siflower SF19A2890 peripheral CRM blocks"
+	depends on MIPS || ARCH_SIFLOWER || COMPILE_TEST
+	help
+	  Supports the peripheral Clock and Reset Manager (CRM) blocks found
+	  in SF19A2890 and SF21 SoCs. Each CRM block manages clock gating and
+	  reset for a group of APB peripherals.
+
 config CLK_SF21_TOPCRM
 	bool "Clock driver for Siflower SF21A6826/SF21H8898 Top Clock & Reset Module"
 	depends on RISCV || COMPILE_TEST
