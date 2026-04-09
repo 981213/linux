@@ -12,14 +12,6 @@
 #include "dma.h"
 #include "eth.h"
 
-/* Dummy netdev initialization for NAPI */
-static void sfxgmac_init_dummy_netdev(struct net_device *dev)
-{
-	dev->reg_state = NETREG_DUMMY;
-	set_bit(__LINK_STATE_PRESENT, &dev->state);
-	set_bit(__LINK_STATE_START, &dev->state);
-}
-
 struct xgmac_dma_desc_rx {
 	struct xgmac_dma_desc norm;
 	struct xgmac_dma_desc ctxt;
@@ -1429,6 +1421,7 @@ DEFINE_SHOW_ATTRIBUTE(xgmac_dma_debug);
 
 static int xgmac_dma_probe(struct platform_device *pdev)
 {
+	struct xgmac_dma_priv **napi_priv;
 	struct xgmac_dma_priv *priv;
 	const char *irq_name;
 	char buf[4];
@@ -1480,7 +1473,10 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 	/* we run multiple netdevs on the same DMA ring so we need a dummy
 	 * device for NAPI to work
 	 */
-	sfxgmac_init_dummy_netdev(&priv->napi_dev);
+	priv->napi_dev = alloc_netdev_dummy(sizeof(struct xgmac_dma_priv *));
+
+	napi_priv = netdev_priv(priv->napi_dev);
+	*napi_priv = priv;
 
 	/* DMA IRQ */
 	ret = platform_get_irq_byname(pdev, "sbd");
@@ -1518,15 +1514,14 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 
 		priv->txq[i].idx = i;
 		spin_lock_init(&priv->txq[i].lock);
-		netif_napi_add_tx_weight(&priv->napi_dev, &priv->txq[i].napi,
+		netif_napi_add_tx_weight(priv->napi_dev, &priv->txq[i].napi,
 				  xgmac_dma_napi_tx, NAPI_POLL_WEIGHT);
 		irq_set_affinity_hint(priv->txq[i].irq, cpumask_of(i % NR_CPUS));
 	}
 
 	/* RX IRQ */
 #ifdef CONFIG_NET_SIFLOWER_ETH_RX_THREAD
-	strscpy(priv->napi_dev.name, KBUILD_MODNAME, IFNAMSIZ);
-	priv->napi_dev.threaded = 1;
+	priv->napi_dev->threaded = 1;
 #endif
 	for (i = 0; i < DMA_CH_MAX; i++) {
 		snprintf(buf, sizeof(buf), "rx%u", i);
@@ -1549,7 +1544,7 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 			goto out_napi_del;
 
 		priv->rxq[i].idx = i;
-		netif_napi_add_weight(&priv->napi_dev, &priv->rxq[i].napi,
+		netif_napi_add_weight(priv->napi_dev, &priv->rxq[i].napi,
 			       xgmac_dma_napi_rx, NAPI_POLL_WEIGHT);
 		irq_set_affinity_hint(priv->rxq[i].irq, cpumask_of(i % NR_CPUS));
 	}
