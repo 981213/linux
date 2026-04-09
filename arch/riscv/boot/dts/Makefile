@@ -7,6 +7,7 @@ subdir-y += eswin
 subdir-y += microchip
 subdir-y += renesas
 subdir-y += sifive
+subdir-y += siflower
 subdir-y += sophgo
 subdir-y += spacemit
 subdir-y += starfive
