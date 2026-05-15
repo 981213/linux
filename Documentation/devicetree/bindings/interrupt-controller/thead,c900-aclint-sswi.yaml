@@ -26,6 +26,7 @@ properties:
     oneOf:
       - items:
           - enum:
+              - siflower,sf21-aclint-sswi
               - sophgo,sg2044-aclint-sswi
           - const: thead,c900-aclint-sswi
       - items:
