@@ -1,0 +1,309 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+
+#include <dt-bindings/clock/siflower,sf21-topcrm.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+
+/ {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	aliases {
+		serial0 = &uart0;
+		serial1 = &uart1;
+	};
+
+	cpus: cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			compatible = "riscv";
+			device_type = "cpu";
+			reg = <0>;
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b",
+						"sstc", "svinval", "svnapot",
+						"svpbmt", "zba", "zbb", "zbc",
+						"zbs", "zfh", "zicbom", "zicbop",
+						"zicboz", "zicntr", "zicsr",
+						"zifencei", "zihintpause", "zihpm";
+			i-cache-block-size = <64>;
+			i-cache-size = <32768>;
+			i-cache-sets = <128>;
+			d-cache-block-size = <64>;
+			d-cache-size = <32768>;
+			d-cache-sets = <128>;
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			clocks = <&topcrm CLK_CPU>;
+			next-level-cache = <&l2_cache>;
+			mmu-type = "riscv,sv39";
+
+			cpu0_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+
+		cpu@1 {
+			compatible = "riscv";
+			device_type = "cpu";
+			reg = <1>;
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b",
+						"sstc", "svinval", "svnapot",
+						"svpbmt", "zba", "zbb", "zbc",
+						"zbs", "zfh", "zicbom", "zicbop",
+						"zicboz", "zicntr", "zicsr",
+						"zifencei", "zihintpause", "zihpm";
+			i-cache-block-size = <64>;
+			i-cache-size = <32768>;
+			i-cache-sets = <128>;
+			d-cache-block-size = <64>;
+			d-cache-size = <32768>;
+			d-cache-sets = <128>;
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			clocks = <&topcrm CLK_CPU>;
+			next-level-cache = <&l2_cache>;
+			mmu-type = "riscv,sv39";
+
+			cpu1_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+
+		cpu@2 {
+			compatible = "riscv";
+			device_type = "cpu";
+			reg = <2>;
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b",
+						"sstc", "svinval", "svnapot",
+						"svpbmt", "zba", "zbb", "zbc",
+						"zbs", "zfh", "zicbom", "zicbop",
+						"zicboz", "zicntr", "zicsr",
+						"zifencei", "zihintpause", "zihpm";
+			i-cache-block-size = <64>;
+			i-cache-size = <32768>;
+			i-cache-sets = <128>;
+			d-cache-block-size = <64>;
+			d-cache-size = <32768>;
+			d-cache-sets = <128>;
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			clocks = <&topcrm CLK_CPU>;
+			next-level-cache = <&l2_cache>;
+			mmu-type = "riscv,sv39";
+
+			cpu2_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+
+		cpu@3 {
+			compatible = "riscv";
+			device_type = "cpu";
+			reg = <3>;
+			riscv,isa-base = "rv64i";
+			riscv,isa-extensions = "i", "m", "a", "f", "d", "c", "b",
+						"sstc", "svinval", "svnapot",
+						"svpbmt", "zba", "zbb", "zbc",
+						"zbs", "zfh", "zicbom", "zicbop",
+						"zicboz", "zicntr", "zicsr",
+						"zifencei", "zihintpause", "zihpm";
+			i-cache-block-size = <64>;
+			i-cache-size = <32768>;
+			i-cache-sets = <128>;
+			d-cache-block-size = <64>;
+			d-cache-size = <32768>;
+			d-cache-sets = <128>;
+			riscv,cbom-block-size = <64>;
+			riscv,cbop-block-size = <64>;
+			riscv,cboz-block-size = <64>;
+			clocks = <&topcrm CLK_CPU>;
+			next-level-cache = <&l2_cache>;
+			mmu-type = "riscv,sv39";
+
+			cpu3_intc: interrupt-controller {
+				#interrupt-cells = <1>;
+				compatible = "riscv,cpu-intc";
+				interrupt-controller;
+			};
+		};
+
+		l2_cache: l2-cache {
+			compatible = "cache";
+			cache-level = <2>;
+			cache-block-size = <64>;
+			cache-size = <262144>;
+			cache-sets = <256>;
+			cache-unified;
+		};
+	};
+
+	xin25m: xin25m {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <25000000>;
+		clock-output-names = "xin25m";
+	};
+
+	timer {
+		compatible = "riscv,timer";
+		interrupts-extended = <&cpu0_intc 5>, <&cpu1_intc 5>,
+				      <&cpu2_intc 5>, <&cpu3_intc 5>;
+	};
+
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		dma-noncoherent;
+		interrupt-parent = <&plic>;
+		ranges;
+
+		topcrm: clock-controller@ce00400 {
+			compatible = "siflower,sf21-topcrm";
+			reg = <0x0 0x0ce00400 0x0 0x400>;
+			clocks = <&xin25m>;
+			clock-names = "xin25m";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+		};
+
+		i2ccrm: clock-controller@ce08400 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce08400 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>, <&topcrm CLK_APB>;
+			clock-output-names = "i2c0", "i2c1";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,num-resets = <2>;
+		};
+
+		spicrm: clock-controller@ce08800 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce08800 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>, <&topcrm CLK_APB>,
+				 <&topcrm CLK_APB>, <&topcrm CLK_APB>;
+			clock-output-names = "spi0_apb", "spi0_ssp",
+					     "spi1_apb", "spi1_ssp";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,reset-masks = <0x3 0xc>;
+		};
+
+		uartcrm: clock-controller@ce08c00 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce08c00 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>, <&topcrm CLK_APB>,
+				 <&topcrm CLK_UART>, <&topcrm CLK_UART>;
+			clock-output-names = "uart0_apb", "uart1_apb",
+					     "uart0", "uart1";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,valid-gates = <0x33>;
+			siflower,critical-gates = <0x22>;
+			siflower,reset-masks = <0x11 0x22>;
+		};
+
+		timercrm: clock-controller@ce09800 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce09800 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>;
+			clock-output-names = "timer";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,reset-masks = <0x1>;
+		};
+
+		wdtcrm: clock-controller@ce09c00 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce09c00 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>;
+			clock-output-names = "wdt";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,reset-masks = <0x1>;
+		};
+
+		gpiocrm: clock-controller@ce0a000 {
+			compatible = "siflower,sf19a2890-periph-crm";
+			reg = <0x0 0x0ce0a000 0x0 0x10>;
+			clocks = <&topcrm CLK_APB>;
+			clock-output-names = "gpio";
+			#clock-cells = <1>;
+			#reset-cells = <1>;
+			siflower,reset-masks = <0x1>;
+		};
+
+		uart0: serial@c300000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x0 0x0c300000 0x0 0x1000>;
+			interrupts = <43 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&uartcrm 2>, <&uartcrm 0>;
+			clock-names = "uartclk", "apb_pclk";
+			resets = <&uartcrm 0>;
+			status = "disabled";
+		};
+
+		uart1: serial@c301000 {
+			compatible = "arm,pl011", "arm,primecell";
+			reg = <0x0 0x0c301000 0x0 0x1000>;
+			interrupts = <44 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&uartcrm 3>, <&uartcrm 1>;
+			clock-names = "uartclk", "apb_pclk";
+			resets = <&uartcrm 1>;
+			status = "disabled";
+		};
+
+		plic: interrupt-controller@108000000 {
+			compatible = "siflower,sf21-plic", "thead,c900-plic";
+			reg = <0x1 0x8000000 0x0 0x400000>;
+			interrupt-controller;
+			#address-cells = <0>;
+			#interrupt-cells = <2>;
+			interrupts-extended = <&cpu0_intc 11>, <&cpu0_intc 9>,
+					      <&cpu1_intc 11>, <&cpu1_intc 9>,
+					      <&cpu2_intc 11>, <&cpu2_intc 9>,
+					      <&cpu3_intc 11>, <&cpu3_intc 9>;
+			riscv,ndev = <176>;
+		};
+
+		interrupt-controller@10c000000 {
+			compatible = "siflower,sf21-aclint-mswi",
+				     "thead,c900-aclint-mswi";
+			reg = <0x1 0xc000000 0x0 0x4000>;
+			interrupts-extended = <&cpu0_intc 3>, <&cpu1_intc 3>,
+					      <&cpu2_intc 3>, <&cpu3_intc 3>;
+		};
+
+		timer@10c00bff8 {
+			compatible = "siflower,sf21-aclint-mtimer",
+				     "thead,c900-aclint-mtimer";
+			reg = <0x1 0xc00bff8 0x0 0x8>;
+			reg-names = "mtimecmp";
+			interrupts-extended = <&cpu0_intc 7>, <&cpu1_intc 7>,
+					      <&cpu2_intc 7>, <&cpu3_intc 7>;
+		};
+
+		interrupt-controller@10c00c000 {
+			compatible = "siflower,sf21-aclint-sswi",
+				     "thead,c900-aclint-sswi";
+			reg = <0x1 0xc00c000 0x0 0x1000>;
+			#interrupt-cells = <0>;
+			interrupt-controller;
+			interrupts-extended = <&cpu0_intc 1>, <&cpu1_intc 1>,
+					      <&cpu2_intc 1>, <&cpu3_intc 1>;
+		};
+	};
+};
