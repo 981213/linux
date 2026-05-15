@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/riscv/siflower.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Siflower SoC-based boards
+
+maintainers:
+  - Chuanhong Guo <gch981213@gmail.com>
+
+description:
+  Siflower SoC-based boards
+
+properties:
+  $nodename:
+    const: '/'
+
+  compatible:
+    oneOf:
+      - description: Banana Pi BPI-RV2
+        items:
+          - const: bananapi,bpi-rv2
+          - const: siflower,sf21h8898
+
+      - description: Siflower SF21A6826 SoC
+        items:
+          - const: siflower,sf21a6826
+
+additionalProperties: true
+
+...
