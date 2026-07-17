@@ -6,6 +6,41 @@
 	compatible = "bananapi,bpi-rv2-nand", "siflower,sf21h8898";
 };
 
+/*
+ * The SPI-NAND provider is not usable yet. Do not let optional factory MAC
+ * address cells block the Ethernet devices from probing through fw_devlink.
+ */
+&xgmac0 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac1 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac2 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac3 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac4 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+	/delete-property/ mac-address-increment;
+};
+
+&xgmac5 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
 &spi0 {
 	status = "okay";
 	num-cs = <2>;

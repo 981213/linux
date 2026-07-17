@@ -1421,8 +1421,9 @@ DEFINE_SHOW_ATTRIBUTE(xgmac_dma_debug);
 
 static int xgmac_dma_probe(struct platform_device *pdev)
 {
-	struct xgmac_dma_priv **napi_priv;
 	struct xgmac_dma_priv *priv;
+	unsigned int rx_napi = 0;
+	unsigned int tx_napi = 0;
 	const char *irq_name;
 	char buf[4];
 	int ret;
@@ -1469,25 +1470,26 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 	 * hash random use queue 0-3
 	 */
 	ret = regmap_write(priv->ethsys, ETHSYS_MRI_Q_EN, 0x003F003F);
+	if (ret)
+		return ret;
 
 	/* we run multiple netdevs on the same DMA ring so we need a dummy
 	 * device for NAPI to work
 	 */
-	priv->napi_dev = alloc_netdev_dummy(sizeof(struct xgmac_dma_priv *));
-
-	napi_priv = netdev_priv(priv->napi_dev);
-	*napi_priv = priv;
+	priv->napi_dev = alloc_netdev_dummy(0);
+	if (!priv->napi_dev)
+		return -ENOMEM;
 
 	/* DMA IRQ */
 	ret = platform_get_irq_byname(pdev, "sbd");
 	if (ret < 0)
-		return ret;
+		goto out_free_netdev;
 
 	priv->irq = ret;
 	ret = devm_request_irq(&pdev->dev, ret, xgmac_dma_irq_misc, 0,
 			       "xgmac_dma_sbd", priv);
 	if (ret)
-		return ret;
+		goto out_free_netdev;
 
 	irq_set_affinity_hint(priv->irq, cpumask_of(1));
 
@@ -1516,6 +1518,7 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 		spin_lock_init(&priv->txq[i].lock);
 		netif_napi_add_tx_weight(priv->napi_dev, &priv->txq[i].napi,
 				  xgmac_dma_napi_tx, NAPI_POLL_WEIGHT);
+		tx_napi++;
 		irq_set_affinity_hint(priv->txq[i].irq, cpumask_of(i % NR_CPUS));
 	}
 
@@ -1546,6 +1549,7 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 		priv->rxq[i].idx = i;
 		netif_napi_add_weight(priv->napi_dev, &priv->rxq[i].napi,
 			       xgmac_dma_napi_rx, NAPI_POLL_WEIGHT);
+		rx_napi++;
 		irq_set_affinity_hint(priv->rxq[i].irq, cpumask_of(i % NR_CPUS));
 	}
 
@@ -1574,12 +1578,19 @@ static int xgmac_dma_probe(struct platform_device *pdev)
 out_clk_disable:
 	clk_bulk_disable_unprepare(DMA_NUM_CLKS, priv->clks);
 out_napi_del:
-	for (i = 0; i < DMA_CH_MAX; i++) {
+	while (rx_napi) {
+		i = --rx_napi;
 		irq_set_affinity_hint(priv->rxq[i].irq, NULL);
-		irq_set_affinity_hint(priv->txq[i].irq, NULL);
 		netif_napi_del(&priv->rxq[i].napi);
+	}
+	while (tx_napi) {
+		i = --tx_napi;
+		irq_set_affinity_hint(priv->txq[i].irq, NULL);
 		netif_napi_del(&priv->txq[i].napi);
 	}
+	irq_set_affinity_hint(priv->irq, NULL);
+out_free_netdev:
+	free_netdev(priv->napi_dev);
 	return ret;
 }
 
@@ -1599,6 +1610,8 @@ static void xgmac_dma_remove(struct platform_device *pdev)
 		netif_napi_del(&priv->rxq[i].napi);
 		netif_napi_del(&priv->txq[i].napi);
 	}
+	irq_set_affinity_hint(priv->irq, NULL);
+	free_netdev(priv->napi_dev);
 }
 
 static const struct of_device_id xgmac_dma_match[] = {
