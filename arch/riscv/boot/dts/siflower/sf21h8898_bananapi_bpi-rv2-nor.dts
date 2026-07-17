@@ -6,6 +6,42 @@
 	compatible = "bananapi,bpi-rv2-nor", "siflower,sf21h8898";
 };
 
+/*
+ * The NOR factory partition on this board does not contain a valid MAC
+ * address. Avoid blocking the Ethernet devices on an unusable NVMEM cell;
+ * the driver will generate a random address instead.
+ */
+&xgmac0 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac1 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac2 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac3 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
+&xgmac4 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+	/delete-property/ mac-address-increment;
+};
+
+&xgmac5 {
+	/delete-property/ nvmem-cells;
+	/delete-property/ nvmem-cell-names;
+};
+
 &spi0 {
 	status = "okay";
 	num-cs = <2>;
