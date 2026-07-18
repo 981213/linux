@@ -14,9 +14,12 @@
  * TCP and UDP use symmetric matching: all five tuple fields participate in
  * the hash.  Basic, full-cone, host-restricted and port-restricted NAT differ
  * only in the mode registers and in which tuple fields software zeroes before
- * hashing; they are intentionally not exposed yet.  IPv6 without translation
- * uses the hardware L2-forward mode, whose default mode 0 hashes destination
- * IP only and leaves L3 addresses and L4 ports unchanged.
+ * hashing; they are intentionally not exposed yet.  IPv6 defaults to the
+ * hardware L2-forward mode, whose mode 0 hashes destination IP only and leaves
+ * L3/L4 unchanged.  V6LF_EN changes the interpretation of every IPv6 NAPT row
+ * and is mutually exclusive with NAT66.  On the first NAT66 flow the driver
+ * withdraws IPv6 LF rows but retains software shadows; after the last NAT66
+ * flow is removed it switches back and restores those LF rows.
  *
  * Direction selection can use configured private IPv4/IPv6 prefixes (up to
  * eight of each) or the ingress WAN-port table.  Linux has no generic LAN/WAN
@@ -45,6 +48,7 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
+#include <linux/ppp_defs.h>
 #include <linux/seq_file.h>
 #include <linux/slab.h>
 #include <linux/tcp.h>
@@ -165,6 +169,7 @@ struct dpns_nat_data {
 	u16 router_port;
 	u16 mac_index;
 	u16 vid;
+	u16 ingress_vid;
 	u8 intf_index;
 	u8 ingress_port;
 	u8 output_port;
@@ -172,6 +177,7 @@ struct dpns_nat_data {
 	bool v6;
 	bool dnat;
 	bool l2_forward;
+	struct dpns_modhdr_cfg modhdr;
 	u8 src_mac[ETH_ALEN];
 	u8 dst_mac[ETH_ALEN];
 };
@@ -201,8 +207,11 @@ struct dpns_nat_entry {
 	bool v6;
 	bool dnat;
 	bool l2_forward;
+	bool active;
 	u8 dst_mac[ETH_ALEN];
 	u64 lastused;
+	struct dpns_nat_hash_tuple tuple;
+	struct dpns_nat_data data;
 };
 
 struct dpns_nat {
@@ -215,6 +224,8 @@ struct dpns_nat {
 	struct dpns_nat_router4 router4[DPNS_NAT_ROUTER_V4_ENTRIES];
 	struct dpns_nat_router6 router6[DPNS_NAT_ROUTER_V6_ENTRIES];
 	int wan_port;
+	int wan_vid;
+	bool v6_lf_enabled;
 };
 
 static const u16 dpns_nat_hash_mask[DPNS_NAT_HASH_LAYERS] = {
@@ -404,23 +415,30 @@ static int dpns_nat_alloc_row(struct dpns_nat *nat, bool v6,
 	return -ENOSPC;
 }
 
-static void dpns_nat_free_row(struct dpns_nat *nat,
-			      const struct dpns_nat_entry *entry)
+static int dpns_nat_free_row(struct dpns_nat *nat,
+			     const struct dpns_nat_entry *entry)
 {
 	u32 zero[14] = {};
+	int ret;
 
 	if (entry->v6) {
-		dpns_nat_table_access(nat, true, DPNS_NAT_NAPT01, entry->row,
-				      zero, ARRAY_SIZE(zero));
+		ret = dpns_nat_table_access(nat, true, DPNS_NAT_NAPT01,
+					    entry->row, zero, ARRAY_SIZE(zero));
+		if (ret)
+			return ret;
 		clear_bit(entry->row, nat->napt0_map);
 		clear_bit(entry->row, nat->napt1_map);
 	} else {
-		dpns_nat_table_access(nat, true,
-				      entry->second_slot ? DPNS_NAT_NAPT1 :
-				      DPNS_NAT_NAPT0, entry->row, zero, 6);
+		ret = dpns_nat_table_access(nat, true,
+					    entry->second_slot ? DPNS_NAT_NAPT1 :
+					    DPNS_NAT_NAPT0, entry->row, zero, 6);
+		if (ret)
+			return ret;
 		clear_bit(entry->row, entry->second_slot ? nat->napt1_map :
 			  nat->napt0_map);
 	}
+
+	return 0;
 }
 
 static int dpns_nat_write_row(struct dpns_nat *nat,
@@ -511,6 +529,123 @@ static int dpns_nat_insert_hash(struct dpns_nat *nat,
 	return -ENOSPC;
 }
 
+static int dpns_nat_entry_deactivate(struct dpns_nat *nat,
+				     struct dpns_nat_entry *entry)
+{
+	u32 zero = 0;
+	int ret;
+
+	if (!entry->active)
+		return 0;
+
+	ret = dpns_nat_table_access(nat, true, entry->hash_table,
+				    entry->hash_index, &zero, 1);
+	if (ret)
+		return ret;
+	ret = dpns_nat_free_row(nat, entry);
+	if (ret) {
+		/* Keep the old mode usable if the NAPT clear timed out. */
+		dpns_nat_insert_hash(nat, entry, &entry->tuple, entry->dnat);
+		return ret;
+	}
+	entry->active = false;
+	return 0;
+}
+
+static int dpns_nat_entry_activate(struct dpns_nat *nat,
+				   struct dpns_nat_entry *entry)
+{
+	int ret;
+
+	if (entry->active)
+		return 0;
+	ret = dpns_nat_alloc_row(nat, entry->v6, entry);
+	if (ret)
+		return ret;
+	ret = dpns_nat_write_row(nat, entry, &entry->data);
+	if (ret)
+		goto err_row;
+	ret = dpns_nat_insert_hash(nat, entry, &entry->tuple, entry->dnat);
+	if (ret)
+		goto err_row;
+	entry->active = true;
+	return 0;
+
+err_row:
+	dpns_nat_free_row(nat, entry);
+	return ret;
+}
+
+static bool dpns_nat_has_v6_nat(const struct dpns_nat *nat)
+{
+	const struct dpns_nat_entry *entry;
+
+	list_for_each_entry(entry, &nat->entries, list)
+		if (entry->v6 && !entry->l2_forward)
+			return true;
+	return false;
+}
+
+static int dpns_nat_v6_lf_disable(struct dpns_nat *nat)
+{
+	struct dpns_nat_entry *entry;
+	int ret;
+
+	if (!nat->v6_lf_enabled)
+		return 0;
+
+	/* V6LF_EN changes how all IPv6 NAPT rows are interpreted.  Withdraw
+	 * every LF hash before changing it, but retain the software entry and
+	 * its L2/interface resources so Linux's flowtable cookie stays valid.
+	 */
+	list_for_each_entry(entry, &nat->entries, list) {
+		if (!entry->v6 || !entry->l2_forward)
+			continue;
+		ret = dpns_nat_entry_deactivate(nat, entry);
+		if (ret)
+			goto restore;
+	}
+	dpns_rmw(nat->priv, SE_NAT_CONFIG1, SE_NAT_V6_LF_ENABLE, 0);
+	nat->v6_lf_enabled = false;
+	dev_info(nat->priv->dev,
+		 "IPv6 NAT flow detected; switched NAT engine from LF to NAT mode\n");
+	return 0;
+
+restore:
+	list_for_each_entry(entry, &nat->entries, list)
+		if (entry->v6 && entry->l2_forward && !entry->active)
+			dpns_nat_entry_activate(nat, entry);
+	return ret;
+}
+
+static void dpns_nat_v6_lf_enable(struct dpns_nat *nat)
+{
+	struct dpns_nat_entry *entry;
+	bool switched;
+	int ret;
+
+	if (dpns_nat_has_v6_nat(nat))
+		return;
+
+	switched = !nat->v6_lf_enabled;
+	if (switched) {
+		dpns_rmw(nat->priv, SE_NAT_CONFIG1, 0, SE_NAT_V6_LF_ENABLE);
+		nat->v6_lf_enabled = true;
+	}
+	list_for_each_entry(entry, &nat->entries, list) {
+		if (!entry->v6 || !entry->l2_forward || entry->active)
+			continue;
+		ret = dpns_nat_entry_activate(nat, entry);
+		if (ret)
+			dev_warn_ratelimited(nat->priv->dev,
+					     "failed to restore IPv6 LF cookie %lx: %d\n",
+					     entry->cookie, ret);
+	}
+	if (switched)
+		dev_info(nat->priv->dev,
+			 "last IPv6 NAT flow removed; switched NAT engine back to LF mode\n");
+}
+
 static void dpns_nat_mangle_eth(const struct flow_action_entry *act,
 				void *eth)
 {
@@ -541,24 +676,27 @@ static void dpns_nat_write_wan_slot(struct dpns_nat *nat, u8 slot, u32 value)
 		 upper_32_bits(pair));
 }
 
-static int dpns_nat_set_wan_port(struct dpns_nat *nat, u8 port,
-				 struct netlink_ext_ack *extack)
+static int dpns_nat_set_wan(struct dpns_nat *nat, u8 port, u16 vid,
+			    struct netlink_ext_ack *extack)
 {
-	if (nat->wan_port >= 0 && nat->wan_port != port) {
+	if (nat->wan_port >= 0 &&
+	    (nat->wan_port != port || nat->wan_vid != vid)) {
 		NL_SET_ERR_MSG_MOD(extack,
-			"flow route conflicts with the established DPNS WAN port");
+			"flow route conflicts with the established DPNS WAN port/VLAN");
 		return -EOPNOTSUPP;
 	}
 	if (nat->wan_port < 0) {
 		u32 value = FIELD_PREP(SE_WAN_PORT, port) |
-			    FIELD_PREP(SE_WAN_VID, 0) | SE_WAN_VALID;
+			    FIELD_PREP(SE_WAN_VID, vid) | SE_WAN_VALID;
 
 		nat->wan_port = port;
+		nat->wan_vid = vid;
 		/* Hardware keeps IPv4 and IPv6 WAN descriptors in slots 0 and 8. */
 		dpns_nat_write_wan_slot(nat, 0, value);
 		dpns_nat_write_wan_slot(nat, 8, value);
-		dev_info(nat->priv->dev, "NAT WAN role assigned to physical port %u\n",
-			 port);
+		dev_info(nat->priv->dev,
+			 "NAT WAN role assigned to physical port %u VLAN %u\n",
+			 port, vid);
 	}
 	return 0;
 }
@@ -571,6 +709,33 @@ static void dpns_nat_ipv6_to_hw(u32 *dst, const struct in6_addr *src)
 		dst[i] = ntohl(src->s6_addr32[3 - i]);
 }
 
+static int dpns_nat_mangle_ipv6(const struct flow_action_entry *act,
+				struct dpns_nat_data *data, u8 *parts)
+{
+	u32 base, word;
+	u32 *addr;
+
+	if (act->mangle.mask)
+		return -EOPNOTSUPP;
+
+	if (!data->dnat) {
+		base = offsetof(struct ipv6hdr, saddr);
+		addr = data->router_ip6;
+	} else {
+		base = offsetof(struct ipv6hdr, daddr);
+		addr = data->private_ip6;
+	}
+	if (act->mangle.offset < base ||
+	    act->mangle.offset >= base + sizeof(struct in6_addr) ||
+	    (act->mangle.offset - base) % sizeof(u32))
+		return -EOPNOTSUPP;
+
+	word = (act->mangle.offset - base) / sizeof(u32);
+	addr[3 - word] = ntohl(act->mangle.val);
+	*parts |= BIT(word);
+	return 0;
+}
+
 static int dpns_nat_parse_rule(struct dpns_nat *nat,
 			       struct flow_cls_offload *f,
 			       struct dpns_nat_data *data,
@@ -581,6 +746,8 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 	struct flow_action_entry *act;
 	bool ip_mangled = false, port_mangled = false, redirected = false;
 	bool source_xlate = false, dest_xlate = false;
+	bool vlan_push = false;
+	u8 ip6_mangled = 0;
 	u8 wan_port;
 	int i, ret;
 
@@ -601,6 +768,17 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 			if (act->mangle.offset == offsetof(struct iphdr, saddr))
 				source_xlate = true;
 			else if (act->mangle.offset == offsetof(struct iphdr, daddr))
+				dest_xlate = true;
+			break;
+		case FLOW_ACT_MANGLE_HDR_TYPE_IP6:
+			if (act->mangle.offset >= offsetof(struct ipv6hdr, saddr) &&
+			    act->mangle.offset < offsetof(struct ipv6hdr, saddr) +
+						 sizeof(struct in6_addr))
+				source_xlate = true;
+			else if (act->mangle.offset >=
+				 offsetof(struct ipv6hdr, daddr) &&
+				 act->mangle.offset < offsetof(struct ipv6hdr, daddr) +
+						 sizeof(struct in6_addr))
 				dest_xlate = true;
 			break;
 		case FLOW_ACT_MANGLE_HDR_TYPE_TCP:
@@ -627,11 +805,23 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 	    !flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_BASIC) ||
 	    !flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_PORTS))
 		return -EOPNOTSUPP;
-	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_VLAN) ||
-	    flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_CVLAN)) {
+	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_CVLAN)) {
 		NL_SET_ERR_MSG_MOD(f->common.extack,
-			"only untagged physical-port flows are supported");
+			"double-tagged routed flows are not supported");
 		return -EOPNOTSUPP;
+	}
+	if (flow_rule_match_key(rule, FLOW_DISSECTOR_KEY_VLAN)) {
+		struct flow_match_vlan match;
+
+		flow_rule_match_vlan(rule, &match);
+		if (match.key->vlan_tpid != htons(ETH_P_8021Q) ||
+		    match.mask->vlan_id != VLAN_VID_MASK ||
+		    match.mask->vlan_tpid != htons(U16_MAX)) {
+			NL_SET_ERR_MSG_MOD(f->common.extack,
+					   "only exact 802.1Q VLAN matches are supported");
+			return -EOPNOTSUPP;
+		}
+		data->ingress_vid = match.key->vlan_id;
 	}
 	{
 		struct flow_match_meta match;
@@ -642,7 +832,8 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 		if (ret)
 			return ret;
 		if (data->l2_forward && nat->wan_port >= 0)
-			data->dnat = data->ingress_port == nat->wan_port;
+			data->dnat = data->ingress_port == nat->wan_port &&
+				     data->ingress_vid == nat->wan_vid;
 	}
 	{
 		struct flow_match_control match;
@@ -657,11 +848,6 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 				return -EOPNOTSUPP;
 			break;
 		case FLOW_DISSECTOR_KEY_IPV6_ADDRS:
-			if (!data->l2_forward) {
-				NL_SET_ERR_MSG_MOD(f->common.extack,
-					"IPv6 translation is not enabled; only forwarding is supported");
-				return -EOPNOTSUPP;
-			}
 			data->v6 = true;
 			break;
 		default:
@@ -752,6 +938,14 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 					data->router_ip = ntohl(act->mangle.val);
 				ip_mangled = true;
 				break;
+			case FLOW_ACT_MANGLE_HDR_TYPE_IP6:
+				if (!data->v6 || data->l2_forward)
+					return -EOPNOTSUPP;
+				ret = dpns_nat_mangle_ipv6(act, data, &ip6_mangled);
+				if (ret)
+					return ret;
+				ip_mangled = true;
+				break;
 			case FLOW_ACT_MANGLE_HDR_TYPE_TCP:
 			case FLOW_ACT_MANGLE_HDR_TYPE_UDP:
 				if (data->l2_forward)
@@ -769,6 +963,25 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 		case FLOW_ACTION_REDIRECT:
 			break;
 		case FLOW_ACTION_CSUM:
+		case FLOW_ACTION_VLAN_POP:
+			break;
+		case FLOW_ACTION_VLAN_PUSH:
+			if (vlan_push || act->vlan.proto != htons(ETH_P_8021Q) ||
+			    act->vlan.vid >= VLAN_N_VID || act->vlan.prio) {
+				NL_SET_ERR_MSG_MOD(f->common.extack,
+						   "only one priority-zero 802.1Q egress tag is supported");
+				return -EOPNOTSUPP;
+			}
+			data->vid = act->vlan.vid;
+			vlan_push = true;
+			break;
+		case FLOW_ACTION_PPPOE_PUSH:
+			if (data->modhdr.type != DPNS_MODHDR_NONE ||
+			    !act->pppoe.sid)
+				return -EOPNOTSUPP;
+			data->modhdr.type = DPNS_MODHDR_PPPOE;
+			data->modhdr.pppoe.sid = act->pppoe.sid;
+			data->modhdr.pppoe.proto = data->v6 ? PPP_IPV6 : PPP_IP;
 			break;
 		default:
 			return -EOPNOTSUPP;
@@ -798,19 +1011,37 @@ static int dpns_nat_parse_rule(struct dpns_nat *nat,
 		tuple->sip6 = in6addr_any;
 		tuple->dport = 0;
 	} else if (data->dnat) {
-		if (!ip_mangled)
-			data->private_ip = data->router_ip;
+		if (!ip_mangled) {
+			if (data->v6)
+				memcpy(data->private_ip6, data->router_ip6,
+				       sizeof(data->private_ip6));
+			else
+				data->private_ip = data->router_ip;
+		}
 		if (!port_mangled)
 			data->private_port = data->router_port;
 	} else {
-		if (!ip_mangled)
-			data->router_ip = data->private_ip;
+		if (!ip_mangled) {
+			if (data->v6)
+				memcpy(data->router_ip6, data->private_ip6,
+				       sizeof(data->router_ip6));
+			else
+				data->router_ip = data->private_ip;
+		}
 		if (!port_mangled)
 			data->router_port = data->private_port;
 	}
+	if (data->v6 && !data->l2_forward && ip_mangled &&
+	    ip6_mangled != GENMASK(3, 0)) {
+		NL_SET_ERR_MSG_MOD(f->common.extack,
+				   "IPv6 NAT must replace all four address words");
+		return -EOPNOTSUPP;
+	}
 
 	wan_port = data->dnat ? data->ingress_port : data->output_port;
-	ret = dpns_nat_set_wan_port(nat, wan_port, f->common.extack);
+	ret = dpns_nat_set_wan(nat, wan_port,
+			       data->dnat ? data->ingress_vid : data->vid,
+			       f->common.extack);
 	if (ret)
 		return ret;
 	return 0;
@@ -830,11 +1061,8 @@ static struct dpns_nat_entry *dpns_nat_find(struct dpns_nat *nat,
 static void dpns_nat_entry_release(struct dpns_nat *nat,
 				   struct dpns_nat_entry *entry)
 {
-	u32 zero = 0;
-
-	dpns_nat_table_access(nat, true, entry->hash_table,
-			      entry->hash_index, &zero, 1);
-	dpns_nat_free_row(nat, entry);
+	if (entry->active)
+		dpns_nat_entry_deactivate(nat, entry);
 	dpns_nat_router_put(nat, entry->v6, entry->router_index);
 	dpns_intf_put(nat->priv, entry->intf_index);
 	dpns_l2_nexthop_put(nat->priv, entry->dst_mac, entry->vid,
@@ -847,17 +1075,32 @@ static int dpns_nat_replace(struct dpns_nat *nat, struct flow_cls_offload *f)
 {
 	struct dpns_nat_hash_tuple tuple = {};
 	struct dpns_nat_data data = {};
+	struct dpns_intf_cfg intf_cfg = {};
 	struct dpns_nat_entry *entry;
+	const char *stage = "parse";
 	int ret;
 
 	mutex_lock(&nat->lock);
 	if (dpns_nat_find(nat, f->cookie)) {
-		ret = -EEXIST;
+		/* Netfilter may replay an already installed hardware tuple while
+		 * refreshing a flow.  Its cookie and rule are immutable here.
+		 */
+		ret = 0;
 		goto out_unlock;
 	}
 	ret = dpns_nat_parse_rule(nat, f, &data, &tuple);
 	if (ret)
 		goto out_unlock;
+	if (data.v6 && !data.l2_forward) {
+		ret = dpns_nat_v6_lf_disable(nat);
+		if (ret)
+			goto out_unlock;
+	} else if (data.v6 && !nat->v6_lf_enabled) {
+		NL_SET_ERR_MSG_MOD(f->common.extack,
+				   "IPv6 LF cannot be offloaded while IPv6 NAT flows are active");
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
 
 	entry = kzalloc_obj(*entry, GFP_KERNEL);
 	if (!entry) {
@@ -865,29 +1108,40 @@ static int dpns_nat_replace(struct dpns_nat *nat, struct flow_cls_offload *f)
 		goto out_unlock;
 	}
 	entry->cookie = f->cookie;
+	stage = "NAPT allocation";
 	ret = dpns_nat_alloc_row(nat, data.v6, entry);
 	if (ret)
 		goto err_free;
-	if (data.v6)
+	if (data.v6) {
+		stage = "IPv6 router address";
 		ret = dpns_nat_router_get6(nat, data.router_ip6,
 					   &entry->router_index);
-	else
+	} else {
+		stage = "IPv4 router address";
 		ret = dpns_nat_router_get4(nat, data.router_ip,
 					   &entry->router_index);
+	}
 	if (ret)
 		goto err_row;
+	stage = "L2 next hop";
 	ret = dpns_l2_nexthop_get(nat->priv, data.dst_mac, data.vid,
 				  data.output_port, &data.mac_index);
 	if (ret)
 		goto err_router;
-	ret = dpns_intf_get(nat->priv, data.src_mac, data.vid,
-			    data.output_port == nat->wan_port,
-			    &data.intf_index);
+	ether_addr_copy(intf_cfg.src, data.src_mac);
+	intf_cfg.vid = data.vid;
+	intf_cfg.wan = data.output_port == nat->wan_port &&
+			data.vid == nat->wan_vid;
+	intf_cfg.modhdr = data.modhdr;
+	stage = "routed interface";
+	ret = dpns_intf_get(nat->priv, &intf_cfg, &data.intf_index);
 	if (ret)
 		goto err_l2;
+	stage = "NAPT row write";
 	ret = dpns_nat_write_row(nat, entry, &data);
 	if (ret)
 		goto err_intf;
+	stage = "NAT hash insertion";
 	ret = dpns_nat_insert_hash(nat, entry, &tuple, data.dnat);
 	if (ret)
 		goto err_intf;
@@ -897,9 +1151,13 @@ static int dpns_nat_replace(struct dpns_nat *nat, struct flow_cls_offload *f)
 	entry->vid = data.vid;
 	entry->dnat = data.dnat;
 	entry->l2_forward = data.l2_forward;
+	entry->active = true;
+	entry->tuple = tuple;
+	entry->data = data;
 	ether_addr_copy(entry->dst_mac, data.dst_mac);
 	entry->lastused = get_jiffies_64();
 	list_add_tail(&entry->list, &nat->entries);
+	dev_dbg(nat->priv->dev, "offloaded flow cookie %#lx\n", entry->cookie);
 	mutex_unlock(&nat->lock);
 	return 0;
 
@@ -915,6 +1173,12 @@ err_row:
 err_free:
 	kfree(entry);
 out_unlock:
+	if (ret)
+		dev_warn_ratelimited(nat->priv->dev,
+				     "failed to offload flow cookie %#lx at %s: %d\n",
+				     f->cookie, stage, ret);
+	if (ret && data.v6 && !data.l2_forward)
+		dpns_nat_v6_lf_enable(nat);
 	mutex_unlock(&nat->lock);
 	return ret;
 }
@@ -926,10 +1190,14 @@ static int dpns_nat_destroy(struct dpns_nat *nat, struct flow_cls_offload *f)
 
 	mutex_lock(&nat->lock);
 	entry = dpns_nat_find(nat, f->cookie);
-	if (!entry)
+	if (!entry) {
 		ret = -ENOENT;
-	else
+	} else {
+		dev_dbg(nat->priv->dev, "destroying flow cookie %#lx\n",
+			entry->cookie);
 		dpns_nat_entry_release(nat, entry);
+	}
+	dpns_nat_v6_lf_enable(nat);
 	mutex_unlock(&nat->lock);
 	return ret;
 }
@@ -946,9 +1214,11 @@ static int dpns_nat_stats(struct dpns_nat *nat, struct flow_cls_offload *f)
 		ret = -ENOENT;
 		goto out;
 	}
-	visit = dpns_r32(nat->priv, SE_NAT_VISIT(entry->nat_id / 32));
-	if (visit & BIT(entry->nat_id % 32))
-		entry->lastused = get_jiffies_64();
+	if (entry->active) {
+		visit = dpns_r32(nat->priv, SE_NAT_VISIT(entry->nat_id / 32));
+		if (visit & BIT(entry->nat_id % 32))
+			entry->lastused = get_jiffies_64();
+	}
 	f->stats.lastused = entry->lastused;
 out:
 	mutex_unlock(&nat->lock);
@@ -984,14 +1254,16 @@ static int dpns_nat_debugfs_show(struct seq_file *m, void *unused)
 	mutex_lock(&nat->lock);
 	list_for_each_entry(entry, &nat->entries, list)
 		count++;
-	seq_printf(m, "wan_port: %d\nflows: %u\n", nat->wan_port, count);
+	seq_printf(m, "wan_port: %d\nwan_vid: %d\nflows: %u\n",
+		   nat->wan_port, nat->wan_vid, count);
 	list_for_each_entry(entry, &nat->entries, list)
 		seq_printf(m,
-			   "cookie=%#lx nat_id=%u family=ipv%u mode=%s direction=%s output=%u mac=%pM\n",
+			   "cookie=%#lx nat_id=%u family=ipv%u mode=%s state=%s direction=%s output=%u vid=%u mac=%pM\n",
 			   entry->cookie, entry->nat_id, entry->v6 ? 6 : 4,
 			   entry->l2_forward ? "forward" : "nat",
+			   entry->active ? "active" : "dormant",
 			   entry->dnat ? "dnat" : "snat", entry->output_port,
-			   entry->dst_mac);
+			   entry->vid, entry->dst_mac);
 	mutex_unlock(&nat->lock);
 	return 0;
 }
@@ -1059,6 +1331,8 @@ int dpns_nat_init(struct dpns_priv *priv)
 		return -ENOMEM;
 	nat->priv = priv;
 	nat->wan_port = -1;
+	nat->wan_vid = -1;
+	nat->v6_lf_enabled = true;
 	mutex_init(&nat->lock);
 	INIT_LIST_HEAD(&nat->entries);
 	INIT_LIST_HEAD(&nat->block_cb_list);
@@ -1095,7 +1369,7 @@ int dpns_nat_init(struct dpns_priv *priv)
 		dpns_w32(priv, SE_NAT_CONFIG6, min_t(u64, clk - 1, U32_MAX));
 
 	dev_info(priv->dev,
-		 "NAT engine enabled (symmetric TCP/UDP, IPv4 NAT, IPv6 forwarding)\n");
+		 "NAT engine enabled (symmetric TCP/UDP, IPv4 NAT, IPv6 LF with automatic NAT66 switching)\n");
 	return 0;
 }
 

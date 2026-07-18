@@ -92,6 +92,45 @@ def setup_network(args: argparse.Namespace) -> None:
     run("nmcli", "connection", "up", args.tftp_connection, "ifname", args.tftp_interface)
 
 
+def refresh_tftp_link(args: argparse.Namespace) -> None:
+    """Re-negotiate the host link after U-Boot has brought its PHY up."""
+    run("nmcli", "connection", "down", args.tftp_connection)
+    run("nmcli", "connection", "up", args.tftp_connection, "ifname", args.tftp_interface)
+    run("sudo", "systemctl", "restart", "tftp.service")
+
+
+def prime_uboot_network(console: Console, args: argparse.Namespace) -> None:
+    """Exercise U-Boot TFTP before reconnecting the host-side NM profile."""
+    console.buffer.clear()
+    block_command = (
+        f"setenv tftpblocksize {args.tftp_blocksize}; "
+        if args.tftp_blocksize is not None
+        else ""
+    )
+    window_command = (
+        f"setenv tftpwindowsize {args.tftp_windowsize}; "
+        if args.tftp_windowsize is not None
+        else ""
+    )
+    console.write_line(
+        f"setenv ipaddr {args.board_ip}; setenv serverip {args.server_ip}; "
+        f"{block_command}{window_command}tftpboot {args.image}"
+    )
+    deadline = time.monotonic() + args.uboot_timeout
+    transfer_done = False
+    while time.monotonic() < deadline:
+        console.read()
+        output = bytes(console.buffer).lower()
+        marker = max(output.rfind(b"bytes transferred"),
+                     output.rfind(b"retry count exceeded"))
+        if marker >= 0:
+            transfer_done = True
+        if transfer_done and output.rfind(b"sf21h88>") > marker:
+            return
+        time.sleep(0.01)
+    raise TimeoutError("U-Boot prompt not seen after priming its TFTP link")
+
+
 def stop_autoboot(console: Console, timeout: float) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -182,6 +221,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--board-ip", default="10.42.0.2")
     parser.add_argument("--server-ip", default="10.42.0.1")
     parser.add_argument("--tftp-port", type=int, default=69)
+    parser.add_argument(
+        "--tftp-blocksize",
+        type=int,
+        help="set U-Boot tftpblocksize for this boot (for lossy links)",
+    )
+    parser.add_argument(
+        "--tftp-windowsize",
+        type=int,
+        help="set U-Boot tftpwindowsize for this boot (for lossy links)",
+    )
     parser.add_argument("--image", default="kernel.itb")
     parser.add_argument("--uboot-timeout", type=float, default=30)
     parser.add_argument(
@@ -192,6 +241,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--log", type=Path, help="also save raw serial output here")
     parser.add_argument("--skip-network", action="store_true")
+    parser.add_argument(
+        "--refresh-tftp-link",
+        action="store_true",
+        help="reconnect the existing TFTP NM profile after stopping U-Boot",
+    )
     parser.add_argument(
         "--monitor-only",
         action="store_true",
@@ -207,6 +261,10 @@ def main() -> int:
     args = parse_args()
     if args.timeout < 0 or args.uboot_timeout <= 0:
         raise SystemExit("timeouts must be non-negative, and --uboot-timeout must be positive")
+    if args.tftp_blocksize is not None and args.tftp_blocksize <= 0:
+        raise SystemExit("--tftp-blocksize must be positive")
+    if args.tftp_windowsize is not None and args.tftp_windowsize <= 0:
+        raise SystemExit("--tftp-windowsize must be positive")
 
     if not args.monitor_only and not args.skip_network:
         setup_network(args)
@@ -227,13 +285,28 @@ def main() -> int:
         else:
             relay(args, "on")
             stop_autoboot(console, args.uboot_timeout)
+            if args.refresh_tftp_link:
+                prime_uboot_network(console, args)
+                refresh_tftp_link(args)
             port_command = (
                 f"setenv tftpdstp {args.tftp_port}; " if args.tftp_port != 69 else ""
+            )
+            block_command = (
+                f"setenv tftpblocksize {args.tftp_blocksize}; "
+                if args.tftp_blocksize is not None
+                else ""
+            )
+            window_command = (
+                f"setenv tftpwindowsize {args.tftp_windowsize}; "
+                if args.tftp_windowsize is not None
+                else ""
             )
             command = (
                 f"setenv ipaddr {args.board_ip}; "
                 f"setenv serverip {args.server_ip}; "
                 f"{port_command}"
+                f"{block_command}"
+                f"{window_command}"
                 f"tftpboot {args.image}; bootm"
             )
             print(f"\n+ U-Boot: {command}", flush=True)
