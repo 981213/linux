@@ -21,6 +21,7 @@
 
 #include "dpns.h"
 #include "sf_dpns_l2.h"
+#include "sf_dpns_nat.h"
 #include "sf_dpns_port.h"
 #include "sf_dpns_vlan.h"
 
@@ -660,6 +661,41 @@ bool sf_dpns_port_offload_fwd_mark(const struct dpns_port *port)
 	return port && READ_ONCE(port->offload_fwd_mark);
 }
 EXPORT_SYMBOL_GPL(sf_dpns_port_offload_fwd_mark);
+
+int sf_dpns_port_id_by_netdev(const struct net_device *ndev, u8 *id)
+{
+	struct dpns_port *port;
+
+	port = dpns_port_from_dev(READ_ONCE(dpns_instance), ndev);
+	if (!port)
+		return -EOPNOTSUPP;
+	*id = port->id;
+	return 0;
+}
+
+int sf_dpns_port_id_by_ifindex(int ifindex, u8 *id)
+{
+	struct dpns_switchdev *sw = READ_ONCE(dpns_instance);
+	unsigned int i;
+
+	if (!sw)
+		return -ENODEV;
+	for (i = 0; i < DPNS_PHYS_PORTS; i++)
+		if (sw->ports[i] && sw->ports[i]->ndev->ifindex == ifindex) {
+			*id = i;
+			return 0;
+		}
+	return -EOPNOTSUPP;
+}
+
+int sf_dpns_port_setup_tc(struct dpns_port *port, enum tc_setup_type type,
+			  void *type_data)
+{
+	if (!port)
+		return -EOPNOTSUPP;
+	return dpns_nat_setup_tc(port->sw->priv, port, type, type_data);
+}
+EXPORT_SYMBOL_GPL(sf_dpns_port_setup_tc);
 
 int dpns_switchdev_init(struct dpns_priv *priv)
 {

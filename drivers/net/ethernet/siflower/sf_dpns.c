@@ -55,14 +55,32 @@ static int dpns_probe(struct platform_device *pdev)
 		return dev_err_probe(priv->dev, ret,
 				     "failed to initialize L2 engine.\n");
 
+	ret = dpns_intf_init(priv);
+	if (ret) {
+		dpns_l2_fini(priv);
+		return dev_err_probe(priv->dev, ret,
+				     "failed to initialize interface table.\n");
+	}
+
+	ret = dpns_nat_init(priv);
+	if (ret) {
+		dpns_intf_fini(priv);
+		dpns_l2_fini(priv);
+		return dev_err_probe(priv->dev, ret,
+				     "failed to initialize NAT engine.\n");
+	}
+
 	ret = dpns_switchdev_init(priv);
 	if (ret) {
+		dpns_nat_fini(priv);
+		dpns_intf_fini(priv);
 		dpns_l2_fini(priv);
 		return dev_err_probe(priv->dev, ret,
 				     "failed to initialize switchdev.\n");
 	}
 
 	sf_dpns_debugfs_init(priv);
+	dpns_nat_debugfs_init(priv);
 	platform_set_drvdata(pdev, priv);
 	return 0;
 }
@@ -72,6 +90,8 @@ static void dpns_remove(struct platform_device *pdev)
 	struct dpns_priv *priv = platform_get_drvdata(pdev);
 
 	dpns_switchdev_fini(priv);
+	dpns_nat_fini(priv);
+	dpns_intf_fini(priv);
 	dpns_l2_fini(priv);
 	debugfs_remove_recursive(priv->debugfs);
 	reset_control_assert(priv->npu_rst);

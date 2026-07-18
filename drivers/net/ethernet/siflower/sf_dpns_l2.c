@@ -45,15 +45,30 @@ struct dpns_l2_entry {
 	u16 mac_index;
 	u16 hash_index;
 	u8 hash_table;
-	u32 port_mask;
+	u32 switchdev_mask;
+	u16 nat_refs[DPNS_L2_PORTS];
 	bool ageing;
 };
 
 struct dpns_l2 {
 	struct dpns_priv *priv;
+	/* Protects ownership shared by switchdev FDBs and routed flows. */
+	struct mutex lock;
 	DECLARE_BITMAP(mac_map, DPNS_L2_MAC_ENTRIES);
 	struct list_head entries;
 };
+
+static u32 dpns_l2_entry_port_mask(const struct dpns_l2_entry *entry)
+{
+	u32 mask = entry->switchdev_mask;
+	unsigned int i;
+
+	for (i = 0; i < DPNS_L2_PORTS; i++)
+		if (entry->nat_refs[i])
+			mask |= BIT(i);
+
+	return mask;
+}
 
 static const u8 dpns_l2_hash_width[DPNS_L2_HASH_LAYERS] = {
 	10, 9, 9, 8, 8, 7, 7, 7, 6, 6,
@@ -104,7 +119,7 @@ static int dpns_l2_write_mac(struct dpns_l2 *l2,
 	dpns_table_field_set(row, 21, 1, entry->ageing);
 	dpns_table_field_set(row, 22, 2, DPNS_CML_FORWARD);
 	dpns_table_field_set(row, 24, 2, DPNS_CML_FORWARD);
-	dpns_table_field_set(row, 41, 27, entry->port_mask);
+	dpns_table_field_set(row, 41, 27, dpns_l2_entry_port_mask(entry));
 	dpns_table_field_set(row, 68, 48, mac);
 	dpns_table_field_set(row, 116, 12, entry->vid);
 	dpns_table_field_set(row, 129, 1, 1);
@@ -160,7 +175,7 @@ static int __dpns_l2_addr_set(struct dpns_l2 *l2, const u8 *addr, u16 vid,
 
 	entry = dpns_l2_find(l2, addr, vid);
 	if (entry) {
-		entry->port_mask = port_mask;
+		entry->switchdev_mask = port_mask;
 		entry->ageing = ageing;
 		return dpns_l2_write_mac(l2, entry);
 	}
@@ -181,7 +196,7 @@ static int __dpns_l2_addr_set(struct dpns_l2 *l2, const u8 *addr, u16 vid,
 	ether_addr_copy(entry->addr, addr);
 	entry->vid = vid;
 	entry->mac_index = mac_index;
-	entry->port_mask = port_mask;
+	entry->switchdev_mask = port_mask;
 	entry->ageing = ageing;
 	hash_row = mac_index;
 
@@ -230,33 +245,113 @@ static int dpns_l2_entry_remove(struct dpns_l2 *l2,
 int dpns_l2_addr_set(struct dpns_priv *priv, const u8 *addr, u16 vid,
 		     u32 port_mask, bool ageing)
 {
-	return __dpns_l2_addr_set(priv->l2, addr, vid, port_mask, ageing);
+	struct dpns_l2 *l2 = priv->l2;
+	int ret;
+
+	mutex_lock(&l2->lock);
+	ret = __dpns_l2_addr_set(l2, addr, vid, port_mask, ageing);
+	mutex_unlock(&l2->lock);
+	return ret;
 }
 
 int dpns_l2_addr_add_ports(struct dpns_priv *priv, const u8 *addr, u16 vid,
 			   u32 port_mask)
 {
-	struct dpns_l2_entry *entry = dpns_l2_find(priv->l2, addr, vid);
+	struct dpns_l2 *l2 = priv->l2;
+	struct dpns_l2_entry *entry;
+	int ret;
 
+	mutex_lock(&l2->lock);
+	entry = dpns_l2_find(l2, addr, vid);
 	if (entry)
-		port_mask |= entry->port_mask;
-	return __dpns_l2_addr_set(priv->l2, addr, vid, port_mask, false);
+		port_mask |= entry->switchdev_mask;
+	ret = __dpns_l2_addr_set(l2, addr, vid, port_mask, false);
+	mutex_unlock(&l2->lock);
+	return ret;
 }
 
 int dpns_l2_addr_del_ports(struct dpns_priv *priv, const u8 *addr, u16 vid,
 			   u32 port_mask)
 {
 	struct dpns_l2 *l2 = priv->l2;
-	struct dpns_l2_entry *entry = dpns_l2_find(l2, addr, vid);
+	struct dpns_l2_entry *entry;
+	int ret = 0;
 
+	mutex_lock(&l2->lock);
+	entry = dpns_l2_find(l2, addr, vid);
 	if (!entry)
-		return 0;
+		goto out;
 
-	entry->port_mask &= ~port_mask;
-	if (entry->port_mask)
-		return dpns_l2_write_mac(l2, entry);
+	entry->switchdev_mask &= ~port_mask;
+	if (dpns_l2_entry_port_mask(entry))
+		ret = dpns_l2_write_mac(l2, entry);
+	else
+		ret = dpns_l2_entry_remove(l2, entry);
+out:
+	mutex_unlock(&l2->lock);
+	return ret;
+}
 
-	return dpns_l2_entry_remove(l2, entry);
+int dpns_l2_nexthop_get(struct dpns_priv *priv, const u8 *addr, u16 vid,
+			 u8 port, u16 *mac_index)
+{
+	struct dpns_l2 *l2 = priv->l2;
+	struct dpns_l2_entry *entry;
+	int ret = 0;
+
+	if (port >= DPNS_L2_PORTS || !mac_index)
+		return -EINVAL;
+
+	mutex_lock(&l2->lock);
+	entry = dpns_l2_find(l2, addr, vid);
+	if (!entry) {
+		ret = __dpns_l2_addr_set(l2, addr, vid, 0, false);
+		if (ret)
+			goto out;
+		entry = dpns_l2_find(l2, addr, vid);
+	}
+	if (dpns_l2_entry_port_mask(entry) &&
+	    dpns_l2_entry_port_mask(entry) != BIT(port)) {
+		ret = -EOPNOTSUPP;
+		goto out;
+	}
+	if (entry->nat_refs[port] == U16_MAX) {
+		ret = -EOVERFLOW;
+		goto out;
+	}
+	entry->nat_refs[port]++;
+	ret = dpns_l2_write_mac(l2, entry);
+	if (ret) {
+		entry->nat_refs[port]--;
+		if (!dpns_l2_entry_port_mask(entry))
+			dpns_l2_entry_remove(l2, entry);
+		goto out;
+	}
+	*mac_index = entry->mac_index;
+out:
+	mutex_unlock(&l2->lock);
+	return ret;
+}
+
+void dpns_l2_nexthop_put(struct dpns_priv *priv, const u8 *addr, u16 vid,
+			  u8 port)
+{
+	struct dpns_l2 *l2 = priv->l2;
+	struct dpns_l2_entry *entry;
+
+	if (port >= DPNS_L2_PORTS)
+		return;
+	mutex_lock(&l2->lock);
+	entry = dpns_l2_find(l2, addr, vid);
+	if (!entry || !entry->nat_refs[port])
+		goto out;
+	entry->nat_refs[port]--;
+	if (dpns_l2_entry_port_mask(entry))
+		dpns_l2_write_mac(l2, entry);
+	else
+		dpns_l2_entry_remove(l2, entry);
+out:
+	mutex_unlock(&l2->lock);
 }
 
 void dpns_l2_flush_port(struct dpns_priv *priv, unsigned int port)
@@ -264,15 +359,17 @@ void dpns_l2_flush_port(struct dpns_priv *priv, unsigned int port)
 	struct dpns_l2 *l2 = priv->l2;
 	struct dpns_l2_entry *entry, *tmp;
 
+	mutex_lock(&l2->lock);
 	list_for_each_entry_safe(entry, tmp, &l2->entries, list) {
-		if (!(entry->port_mask & BIT(port)))
+		if (!(entry->switchdev_mask & BIT(port)))
 			continue;
-		entry->port_mask &= ~BIT(port);
-		if (entry->port_mask)
+		entry->switchdev_mask &= ~BIT(port);
+		if (dpns_l2_entry_port_mask(entry))
 			dpns_l2_write_mac(l2, entry);
 		else
 			dpns_l2_entry_remove(l2, entry);
 	}
+	mutex_unlock(&l2->lock);
 }
 
 void dpns_l2_flush_all(struct dpns_priv *priv)
@@ -280,8 +377,16 @@ void dpns_l2_flush_all(struct dpns_priv *priv)
 	struct dpns_l2 *l2 = priv->l2;
 	struct dpns_l2_entry *entry, *tmp;
 
+	mutex_lock(&l2->lock);
 	list_for_each_entry_safe(entry, tmp, &l2->entries, list)
-		dpns_l2_entry_remove(l2, entry);
+		if (entry->switchdev_mask) {
+			entry->switchdev_mask = 0;
+			if (dpns_l2_entry_port_mask(entry))
+				dpns_l2_write_mac(l2, entry);
+			else
+				dpns_l2_entry_remove(l2, entry);
+		}
+	mutex_unlock(&l2->lock);
 }
 
 int dpns_l2_init(struct dpns_priv *priv)
@@ -295,6 +400,7 @@ int dpns_l2_init(struct dpns_priv *priv)
 	if (!l2)
 		return -ENOMEM;
 	l2->priv = priv;
+	mutex_init(&l2->lock);
 	INIT_LIST_HEAD(&l2->entries);
 	set_bit(0, l2->mac_map); /* Hardware reserves row zero. */
 	priv->l2 = l2;

@@ -7,6 +7,8 @@
 #include <linux/reset.h>
 
 struct dpns_l2;
+struct dpns_intf;
+struct dpns_nat;
 struct dpns_switchdev;
 
 #define PKT_ERR_STG_CFG2		0x80038
@@ -38,6 +40,8 @@ struct dpns_priv {
 	/* Serializes the Search Engine's shared indirect table window. */
 	struct mutex table_lock;
 	struct dpns_l2 *l2;
+	struct dpns_intf *intf;
+	struct dpns_nat *nat;
 	struct dpns_switchdev *switchdev;
 };
 
@@ -64,6 +68,11 @@ int dpns_se_init(struct dpns_priv *priv);
 int dpns_tmu_init(struct dpns_priv *priv);
 int dpns_l2_init(struct dpns_priv *priv);
 void dpns_l2_fini(struct dpns_priv *priv);
+int dpns_intf_init(struct dpns_priv *priv);
+void dpns_intf_fini(struct dpns_priv *priv);
+int dpns_nat_init(struct dpns_priv *priv);
+void dpns_nat_fini(struct dpns_priv *priv);
+void dpns_nat_debugfs_init(struct dpns_priv *priv);
 int dpns_vlan_init(struct dpns_priv *priv);
 int dpns_switchdev_init(struct dpns_priv *priv);
 void dpns_switchdev_fini(struct dpns_priv *priv);

@@ -663,6 +663,14 @@ static int xgmac_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
+static int xgmac_setup_tc(struct net_device *dev, enum tc_setup_type type,
+			  void *type_data)
+{
+	struct xgmac_priv *priv = netdev_priv(dev);
+
+	return sf_dpns_port_setup_tc(priv->dp_port, type, type_data);
+}
+
 static const struct net_device_ops xgmac_netdev_ops = {
 	.ndo_open		= xgmac_open,
 	.ndo_stop		= xgmac_stop,
@@ -676,6 +684,7 @@ static const struct net_device_ops xgmac_netdev_ops = {
 	.ndo_neigh_destroy	= xgmac_neigh_destroy,
 	.ndo_get_stats64	= xgmac_get_stats64,
 	.ndo_change_mtu		= xgmac_change_mtu,
+	.ndo_setup_tc		= xgmac_setup_tc,
 };
 
 static struct xgmac_priv *sfxgmac_phylink_to_port(struct phylink_config *config)

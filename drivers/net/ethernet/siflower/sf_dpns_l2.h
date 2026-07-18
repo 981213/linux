@@ -12,6 +12,10 @@ int dpns_l2_addr_add_ports(struct dpns_priv *priv, const unsigned char *addr,
 			   u16 vid, u32 port_mask);
 int dpns_l2_addr_del_ports(struct dpns_priv *priv, const unsigned char *addr,
 			   u16 vid, u32 port_mask);
+int dpns_l2_nexthop_get(struct dpns_priv *priv, const unsigned char *addr,
+			 u16 vid, u8 port, u16 *mac_index);
+void dpns_l2_nexthop_put(struct dpns_priv *priv, const unsigned char *addr,
+			  u16 vid, u8 port);
 void dpns_l2_flush_port(struct dpns_priv *priv, unsigned int port);
 void dpns_l2_flush_all(struct dpns_priv *priv);
 
