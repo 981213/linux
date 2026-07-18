@@ -37,6 +37,12 @@ struct dpns_bridge_vlan {
 	u32 untagged;
 };
 
+enum dpns_matchall_type {
+	DPNS_MATCHALL_NONE,
+	DPNS_MATCHALL_DROP,
+	DPNS_MATCHALL_POLICE,
+};
+
 struct dpns_port {
 	struct dpns_switchdev *sw;
 	struct net_device *ndev;
@@ -46,8 +52,8 @@ struct dpns_port {
 	u16 pvid;
 	unsigned long bridge_flags;
 	bool offload_fwd_mark;
-	bool ingress_drop;
-	unsigned long ingress_drop_cookie;
+	u8 matchall_type;
+	unsigned long matchall_cookie;
 };
 
 struct dpns_switchdev {
@@ -171,7 +177,8 @@ static int dpns_switchdev_apply(struct dpns_switchdev *sw)
 		if (port)
 			stp[i] = dpns_stp_state(port->stp_state);
 		ret = dpns_vlan_port_config(sw->priv, i, bridged, learning,
-					    port && port->ingress_drop,
+					    port && port->matchall_type ==
+					    DPNS_MATCHALL_DROP,
 					    sw->vlan_filtering,
 					    sw->vlan_filtering && bridged ?
 					    port->pvid : 0);
@@ -698,7 +705,9 @@ static int dpns_matchall_replace(struct dpns_port *port,
 				 struct tc_cls_matchall_offload *f)
 {
 	struct flow_action *action = &f->rule->action;
+	struct flow_action_entry *act;
 	struct netlink_ext_ack *extack = f->common.extack;
+	u8 type;
 	int ret;
 
 	if (f->common.protocol != htons(ETH_P_ALL)) {
@@ -711,16 +720,35 @@ static int dpns_matchall_replace(struct dpns_port *port,
 				   "DPNS matchall supports only chain 0");
 		return -EOPNOTSUPP;
 	}
-	if (!flow_offload_has_one_action(action) ||
-	    action->entries[0].id != FLOW_ACTION_DROP) {
+	if (!flow_offload_has_one_action(action)) {
 		NL_SET_ERR_MSG_MOD(extack,
-				   "DPNS matchall supports only one drop action");
+				   "DPNS matchall supports exactly one action");
+		return -EOPNOTSUPP;
+	}
+	act = &action->entries[0];
+	if (act->id == FLOW_ACTION_DROP) {
+		type = DPNS_MATCHALL_DROP;
+	} else if (act->id == FLOW_ACTION_POLICE) {
+		if (!act->police.rate_bytes_ps || act->police.rate_pkt_ps ||
+		    act->police.burst_pkt || act->police.peakrate_bytes_ps ||
+		    act->police.avrate || act->police.overhead ||
+		    act->police.exceed.act_id != FLOW_ACTION_DROP ||
+		    (act->police.notexceed.act_id != FLOW_ACTION_PIPE &&
+		     act->police.notexceed.act_id != FLOW_ACTION_ACCEPT)) {
+			NL_SET_ERR_MSG_MOD(extack,
+					   "DPNS policer supports byte rate with exceed drop and conform pipe/ok only");
+			return -EOPNOTSUPP;
+		}
+		type = DPNS_MATCHALL_POLICE;
+	} else {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "DPNS matchall supports drop or police actions");
 		return -EOPNOTSUPP;
 	}
 
 	mutex_lock(&port->sw->lock);
-	if (port->ingress_drop) {
-		if (port->ingress_drop_cookie != f->cookie) {
+	if (port->matchall_type != DPNS_MATCHALL_NONE) {
+		if (port->matchall_cookie != f->cookie) {
 			NL_SET_ERR_MSG_MOD(extack,
 					   "DPNS supports one ingress matchall rule per port");
 			ret = -EEXIST;
@@ -729,12 +757,18 @@ static int dpns_matchall_replace(struct dpns_port *port,
 		}
 		goto unlock;
 	}
-	port->ingress_drop = true;
-	port->ingress_drop_cookie = f->cookie;
-	ret = dpns_switchdev_apply(port->sw);
-	if (ret) {
-		port->ingress_drop = false;
-		port->ingress_drop_cookie = 0;
+	if (type == DPNS_MATCHALL_DROP) {
+		port->matchall_type = type;
+		ret = dpns_switchdev_apply(port->sw);
+		if (ret)
+			port->matchall_type = DPNS_MATCHALL_NONE;
+	} else {
+		ret = dpns_vlan_port_policer_set(port->sw->priv, port->id,
+						 act->police.rate_bytes_ps);
+	}
+	if (!ret) {
+		port->matchall_type = type;
+		port->matchall_cookie = f->cookie;
 	}
 unlock:
 	mutex_unlock(&port->sw->lock);
@@ -747,17 +781,23 @@ static int dpns_matchall_destroy(struct dpns_port *port,
 	int ret;
 
 	mutex_lock(&port->sw->lock);
-	if (!port->ingress_drop || port->ingress_drop_cookie != f->cookie) {
+	if (port->matchall_type == DPNS_MATCHALL_NONE ||
+	    port->matchall_cookie != f->cookie) {
 		ret = -ENOENT;
 		goto unlock;
 	}
-	port->ingress_drop = false;
-	port->ingress_drop_cookie = 0;
-	ret = dpns_switchdev_apply(port->sw);
-	if (ret) {
-		port->ingress_drop = true;
-		port->ingress_drop_cookie = f->cookie;
+	if (port->matchall_type == DPNS_MATCHALL_DROP) {
+		port->matchall_type = DPNS_MATCHALL_NONE;
+		ret = dpns_switchdev_apply(port->sw);
+		if (ret)
+			port->matchall_type = DPNS_MATCHALL_DROP;
+	} else {
+		ret = dpns_vlan_port_policer_set(port->sw->priv, port->id, 0);
+		if (!ret)
+			port->matchall_type = DPNS_MATCHALL_NONE;
 	}
+	if (!ret)
+		port->matchall_cookie = 0;
 unlock:
 	mutex_unlock(&port->sw->lock);
 	return ret;

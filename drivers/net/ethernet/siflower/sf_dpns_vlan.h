@@ -21,6 +21,8 @@ int dpns_vlan_port_config(struct dpns_priv *priv, unsigned int port,
 			  bool bridge, bool learning, bool ingress_drop,
 			  bool vlan_aware,
 			  u16 pvid);
+int dpns_vlan_port_policer_set(struct dpns_priv *priv, unsigned int port,
+			       u64 rate_bytes_ps);
 int dpns_vlan_entry_write(struct dpns_priv *priv, unsigned int index,
 			  u16 vid, u32 members, u32 untagged,
 			  const u8 stp_state[DPNS_PHYS_PORTS]);

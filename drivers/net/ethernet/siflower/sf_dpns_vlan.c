@@ -9,14 +9,17 @@
  * egress VID row supplies the destination and untagged bitmaps.  Global setup
  * enables both lookup banks, installs 802.1Q TPIDs and four tag-edit action
  * rows tailored to the physical L2 datapath.  An ingress matchall DROP
- * overrides the normal CPU/forward action in that physical port's row.
- * Configuration proceeds port/PVID first, ingress membership second, and
- * egress membership last.
+ * overrides the normal CPU/forward action in that physical port's row.  The
+ * separate per-port speed-limit table meters byte-rate policers in 72-bit
+ * credits over a fixed NPU-clock window.  Configuration proceeds port/PVID
+ * first, ingress membership second, and egress membership last.
  */
 
 #include <linux/bitfield.h>
+#include <linux/clk.h>
 #include <linux/if_ether.h>
 #include <linux/if_vlan.h>
+#include <linux/math64.h>
 
 #include "dpns.h"
 #include "sf_dpns_se.h"
@@ -36,6 +39,11 @@
 #define  SE_EVLAN_L2_IVID_ACTION	GENMASK(21, 20)
 #define  SE_EVLAN_L3_OVID0_DELETE	BIT(25)
 #define  SE_EVLAN_L3_IVID0_DELETE	BIT(26)
+
+#define DPNS_IPSPL_COMPARE_BITS		24
+#define DPNS_IPSPL_CLOCK_MULT		2
+#define DPNS_IPSPL_CREDIT_BYTES		9
+#define DPNS_IPSPL_CREDIT_MAX		GENMASK(24, 0)
 
 enum dpns_iport_action {
 	DPNS_IPORT_DROP,
@@ -142,6 +150,34 @@ int dpns_vlan_port_config(struct dpns_priv *priv, unsigned int port,
 
 	return dpns_vlan_write_iport(priv, port, bridge, learning,
 				     ingress_drop);
+}
+
+int dpns_vlan_port_policer_set(struct dpns_priv *priv, unsigned int port,
+			       u64 rate_bytes_ps)
+{
+	u64 clk = clk_get_rate(priv->clk);
+	u64 divisor, credit;
+	u32 row[2] = {};
+
+	if (port >= DPNS_PHYS_PORTS || !clk)
+		return -EINVAL;
+	if (rate_bytes_ps) {
+		/* The byte-mode policer adds one 72-bit datapath word per
+		 * credit every 2^24 Search Engine clocks. The SE runs at twice
+		 * the exported DPNS bus clock. Zero credit disables policing.
+		 */
+		divisor = clk * DPNS_IPSPL_CLOCK_MULT *
+			  DPNS_IPSPL_CREDIT_BYTES;
+		credit = mul_u64_add_u64_div_u64(rate_bytes_ps,
+						 BIT_ULL(DPNS_IPSPL_COMPARE_BITS),
+						 divisor / 2, divisor);
+		if (!credit || credit > DPNS_IPSPL_CREDIT_MAX)
+			return -ERANGE;
+		row[0] = credit;
+	}
+
+	return dpns_table_write(priv, DPNS_TABLE_IVLAN_SPL, port,
+				row, sizeof(row));
 }
 
 static int dpns_vlan_write_ingress(struct dpns_priv *priv, unsigned int index,
@@ -261,10 +297,13 @@ int dpns_vlan_init(struct dpns_priv *priv)
 
 	dpns_rmw(priv, SE_CONFIG0,
 		 SE_IVLKP_CFG_DISABLE | SE_IVXLT_CFG_DISABLE |
-		 SE_IPSPL_ZERO_LIMIT | SE_IVLKP_CFG_ENTR_MINUS1 |
-		 SE_IVXLT_CFG_ENTR_MINUS1,
+		 SE_IPSPL_DIS_STEP | SE_IPSPL_CMPT_LEN |
+		 SE_IPSPL_ZERO_LIMIT | SE_IPSPL_CNT_MODE |
+		 SE_IVLKP_CFG_ENTR_MINUS1 | SE_IVXLT_CFG_ENTR_MINUS1 |
+		 SE_IPSPL_MODE,
 		 SE_PORTBV_TABLE_VALID | SE_IPORT_TABLE_VALID |
 		 SE_L2_VID_ZERO_MODE |
+		 FIELD_PREP(SE_IPSPL_CMPT_LEN, DPNS_IPSPL_COMPARE_BITS) |
 		 FIELD_PREP(SE_IVLKP_CFG_ENTR_MINUS1, 63) |
 		 FIELD_PREP(SE_IVXLT_CFG_ENTR_MINUS1, 63));
 	dpns_rmw(priv, SE_CONFIG2,
