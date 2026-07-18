@@ -5,7 +5,7 @@
 
 sf_dpns-objs := sf_dpns.o sf_dpns_debugfs.o sf_dpns_tmu.o sf_dpns_se.o \
 		sf_dpns_table.o sf_dpns_vlan.o sf_dpns_l2.o \
-		sf_dpns_modhdr.o sf_dpns_intf.o sf_dpns_nat.o \
+		sf_dpns_modhdr.o sf_dpns_intf.o sf_dpns_nat_ext.o sf_dpns_nat.o \
 		sf_dpns_switchdev.o
 obj-$(CONFIG_NET_SIFLOWER_ETH_DPNS) += sf_dpns.o
 

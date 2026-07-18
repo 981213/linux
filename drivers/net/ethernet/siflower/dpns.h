@@ -9,6 +9,7 @@
 struct dpns_l2;
 struct dpns_intf;
 struct dpns_nat;
+struct dpns_nat_ext;
 struct dpns_switchdev;
 
 #define PKT_ERR_STG_CFG2		0x80038
@@ -42,6 +43,7 @@ struct dpns_priv {
 	struct dpns_l2 *l2;
 	struct dpns_intf *intf;
 	struct dpns_nat *nat;
+	struct dpns_nat_ext *nat_ext;
 	struct dpns_switchdev *switchdev;
 };
 

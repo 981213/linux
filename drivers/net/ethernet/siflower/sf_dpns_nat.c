@@ -60,6 +60,7 @@
 #include "sf_dpns_intf.h"
 #include "sf_dpns_l2.h"
 #include "sf_dpns_nat.h"
+#include "sf_dpns_nat_ext.h"
 #include "sf_dpns_port.h"
 #include "sf_dpns_table.h"
 
@@ -208,10 +209,13 @@ struct dpns_nat_entry {
 	bool dnat;
 	bool l2_forward;
 	bool active;
+	bool external;
+	bool router_ref;
 	u8 dst_mac[ETH_ALEN];
 	u64 lastused;
 	struct dpns_nat_hash_tuple tuple;
 	struct dpns_nat_data data;
+	struct dpns_nat_ext_handle ext;
 };
 
 struct dpns_nat {
@@ -529,6 +533,92 @@ static int dpns_nat_insert_hash(struct dpns_nat *nat,
 	return -ENOSPC;
 }
 
+static void dpns_nat_ext_action_fill(struct dpns_nat_ext_action *action,
+				     const struct dpns_nat_data *data)
+{
+	if (data->v6) {
+		memcpy(action->private_ip, data->private_ip6,
+		       sizeof(action->private_ip));
+		memcpy(action->public_ip, data->public_ip6,
+		       sizeof(action->public_ip));
+		memcpy(action->router_ip, data->router_ip6,
+		       sizeof(action->router_ip));
+	} else {
+		action->private_ip[0] = data->private_ip;
+		action->public_ip[0] = data->public_ip;
+		action->router_ip[0] = data->router_ip;
+	}
+	action->private_port = data->private_port;
+	action->public_port = data->public_port;
+	action->router_port = data->router_port;
+	action->mac_index = data->mac_index;
+	action->intf_index = data->intf_index;
+	action->output_port = data->output_port;
+	action->l4_type = data->l4_type;
+	action->v6 = data->v6;
+	action->dnat = data->dnat;
+}
+
+static bool dpns_nat_can_fallback_external(int ret)
+{
+	return ret == -ENOSPC || ret == -EEXIST;
+}
+
+static int dpns_nat_entry_activate(struct dpns_nat *nat,
+				   struct dpns_nat_entry *entry)
+{
+	struct dpns_nat_ext_action action = {};
+	int ret, cleanup;
+
+	if (entry->active)
+		return 0;
+	entry->v6 = entry->data.v6;
+	entry->external = false;
+	entry->router_ref = false;
+	entry->second_slot = false;
+
+	ret = dpns_nat_alloc_row(nat, entry->data.v6, entry);
+	if (ret)
+		goto try_external;
+	if (entry->data.v6)
+		ret = dpns_nat_router_get6(nat, entry->data.router_ip6,
+					   &entry->router_index);
+	else
+		ret = dpns_nat_router_get4(nat, entry->data.router_ip,
+					   &entry->router_index);
+	if (ret)
+		goto free_row;
+	entry->router_ref = true;
+	ret = dpns_nat_write_row(nat, entry, &entry->data);
+	if (ret)
+		goto free_router;
+	ret = dpns_nat_insert_hash(nat, entry, &entry->tuple, entry->dnat);
+	if (!ret) {
+		entry->active = true;
+		return 0;
+	}
+
+free_router:
+	dpns_nat_router_put(nat, entry->v6, entry->router_index);
+	entry->router_ref = false;
+free_row:
+	cleanup = dpns_nat_free_row(nat, entry);
+	if (cleanup)
+		return cleanup;
+try_external:
+	if (!dpns_nat_can_fallback_external(ret))
+		return ret;
+	dpns_nat_ext_action_fill(&action, &entry->data);
+	ret = dpns_nat_ext_add(nat->priv, &entry->tuple,
+			       sizeof(entry->tuple), &action, &entry->ext);
+	if (ret)
+		return ret;
+	entry->external = true;
+	entry->nat_id = entry->ext.nat_id;
+	entry->active = true;
+	return 0;
+}
+
 static int dpns_nat_entry_deactivate(struct dpns_nat *nat,
 				     struct dpns_nat_entry *entry)
 {
@@ -537,6 +627,13 @@ static int dpns_nat_entry_deactivate(struct dpns_nat *nat,
 
 	if (!entry->active)
 		return 0;
+
+	if (entry->external) {
+		dpns_nat_ext_del(nat->priv, &entry->ext);
+		entry->external = false;
+		entry->active = false;
+		return 0;
+	}
 
 	ret = dpns_nat_table_access(nat, true, entry->hash_table,
 				    entry->hash_index, &zero, 1);
@@ -548,32 +645,12 @@ static int dpns_nat_entry_deactivate(struct dpns_nat *nat,
 		dpns_nat_insert_hash(nat, entry, &entry->tuple, entry->dnat);
 		return ret;
 	}
+	if (entry->router_ref) {
+		dpns_nat_router_put(nat, entry->v6, entry->router_index);
+		entry->router_ref = false;
+	}
 	entry->active = false;
 	return 0;
-}
-
-static int dpns_nat_entry_activate(struct dpns_nat *nat,
-				   struct dpns_nat_entry *entry)
-{
-	int ret;
-
-	if (entry->active)
-		return 0;
-	ret = dpns_nat_alloc_row(nat, entry->v6, entry);
-	if (ret)
-		return ret;
-	ret = dpns_nat_write_row(nat, entry, &entry->data);
-	if (ret)
-		goto err_row;
-	ret = dpns_nat_insert_hash(nat, entry, &entry->tuple, entry->dnat);
-	if (ret)
-		goto err_row;
-	entry->active = true;
-	return 0;
-
-err_row:
-	dpns_nat_free_row(nat, entry);
-	return ret;
 }
 
 static bool dpns_nat_has_v6_nat(const struct dpns_nat *nat)
@@ -1063,7 +1140,6 @@ static void dpns_nat_entry_release(struct dpns_nat *nat,
 {
 	if (entry->active)
 		dpns_nat_entry_deactivate(nat, entry);
-	dpns_nat_router_put(nat, entry->v6, entry->router_index);
 	dpns_intf_put(nat->priv, entry->intf_index);
 	dpns_l2_nexthop_put(nat->priv, entry->dst_mac, entry->vid,
 			      entry->output_port);
@@ -1108,26 +1184,15 @@ static int dpns_nat_replace(struct dpns_nat *nat, struct flow_cls_offload *f)
 		goto out_unlock;
 	}
 	entry->cookie = f->cookie;
-	stage = "NAPT allocation";
-	ret = dpns_nat_alloc_row(nat, data.v6, entry);
-	if (ret)
-		goto err_free;
-	if (data.v6) {
-		stage = "IPv6 router address";
-		ret = dpns_nat_router_get6(nat, data.router_ip6,
-					   &entry->router_index);
-	} else {
-		stage = "IPv4 router address";
-		ret = dpns_nat_router_get4(nat, data.router_ip,
-					   &entry->router_index);
-	}
-	if (ret)
-		goto err_row;
+	entry->dnat = data.dnat;
+	entry->l2_forward = data.l2_forward;
+	entry->v6 = data.v6;
+	entry->tuple = tuple;
 	stage = "L2 next hop";
 	ret = dpns_l2_nexthop_get(nat->priv, data.dst_mac, data.vid,
 				  data.output_port, &data.mac_index);
 	if (ret)
-		goto err_router;
+		goto err_free;
 	ether_addr_copy(intf_cfg.src, data.src_mac);
 	intf_cfg.vid = data.vid;
 	intf_cfg.wan = data.output_port == nat->wan_port &&
@@ -1137,24 +1202,16 @@ static int dpns_nat_replace(struct dpns_nat *nat, struct flow_cls_offload *f)
 	ret = dpns_intf_get(nat->priv, &intf_cfg, &data.intf_index);
 	if (ret)
 		goto err_l2;
-	stage = "NAPT row write";
-	ret = dpns_nat_write_row(nat, entry, &data);
-	if (ret)
-		goto err_intf;
-	stage = "NAT hash insertion";
-	ret = dpns_nat_insert_hash(nat, entry, &tuple, data.dnat);
-	if (ret)
-		goto err_intf;
 
 	entry->intf_index = data.intf_index;
 	entry->output_port = data.output_port;
 	entry->vid = data.vid;
-	entry->dnat = data.dnat;
-	entry->l2_forward = data.l2_forward;
-	entry->active = true;
-	entry->tuple = tuple;
 	entry->data = data;
 	ether_addr_copy(entry->dst_mac, data.dst_mac);
+	stage = "internal/external NAT insertion";
+	ret = dpns_nat_entry_activate(nat, entry);
+	if (ret)
+		goto err_intf;
 	entry->lastused = get_jiffies_64();
 	list_add_tail(&entry->list, &nat->entries);
 	dev_dbg(nat->priv->dev, "offloaded flow cookie %#lx\n", entry->cookie);
@@ -1166,10 +1223,6 @@ err_intf:
 err_l2:
 	dpns_l2_nexthop_put(nat->priv, data.dst_mac, data.vid,
 			      data.output_port);
-err_router:
-	dpns_nat_router_put(nat, data.v6, entry->router_index);
-err_row:
-	dpns_nat_free_row(nat, entry);
 err_free:
 	kfree(entry);
 out_unlock:
@@ -1249,19 +1302,30 @@ static int dpns_nat_debugfs_show(struct seq_file *m, void *unused)
 {
 	struct dpns_nat *nat = m->private;
 	struct dpns_nat_entry *entry;
-	unsigned int count = 0;
+	unsigned int count = 0, internal = 0, external = 0, dormant = 0;
 
 	mutex_lock(&nat->lock);
-	list_for_each_entry(entry, &nat->entries, list)
+	list_for_each_entry(entry, &nat->entries, list) {
 		count++;
-	seq_printf(m, "wan_port: %d\nwan_vid: %d\nflows: %u\n",
-		   nat->wan_port, nat->wan_vid, count);
+		if (!entry->active)
+			dormant++;
+		else if (entry->external)
+			external++;
+		else
+			internal++;
+	}
+	seq_printf(m,
+		   "wan_port: %d\nwan_vid: %d\nflows: %u\ninternal: %u\nexternal: %u\ndormant: %u\n",
+		   nat->wan_port, nat->wan_vid, count, internal, external,
+		   dormant);
 	list_for_each_entry(entry, &nat->entries, list)
 		seq_printf(m,
-			   "cookie=%#lx nat_id=%u family=ipv%u mode=%s state=%s direction=%s output=%u vid=%u mac=%pM\n",
+			   "cookie=%#lx nat_id=%u family=ipv%u mode=%s state=%s table=%s direction=%s output=%u vid=%u mac=%pM\n",
 			   entry->cookie, entry->nat_id, entry->v6 ? 6 : 4,
 			   entry->l2_forward ? "forward" : "nat",
 			   entry->active ? "active" : "dormant",
+			   !entry->active ? "none" :
+			   entry->external ? "external" : "internal",
 			   entry->dnat ? "dnat" : "snat", entry->output_port,
 			   entry->vid, entry->dst_mac);
 	mutex_unlock(&nat->lock);
@@ -1325,6 +1389,7 @@ int dpns_nat_init(struct dpns_priv *priv)
 	u32 mask = 0, val = 0;
 	u64 clk;
 	unsigned int i;
+	int ret;
 
 	nat = devm_kzalloc(priv->dev, sizeof(*nat), GFP_KERNEL);
 	if (!nat)
@@ -1367,6 +1432,11 @@ int dpns_nat_init(struct dpns_priv *priv)
 	clk = clk_get_rate(priv->clk);
 	if (clk)
 		dpns_w32(priv, SE_NAT_CONFIG6, min_t(u64, clk - 1, U32_MAX));
+	ret = dpns_nat_ext_init(priv);
+	if (ret) {
+		priv->nat = NULL;
+		return ret;
+	}
 
 	dev_info(priv->dev,
 		 "NAT engine enabled (symmetric TCP/UDP, IPv4 NAT, IPv6 LF with automatic NAT66 switching)\n");
@@ -1385,6 +1455,7 @@ void dpns_nat_fini(struct dpns_priv *priv)
 		dpns_nat_entry_release(nat, entry);
 	dpns_nat_write_wan_slot(nat, 0, 0);
 	dpns_nat_write_wan_slot(nat, 8, 0);
+	dpns_nat_ext_fini(priv);
 	dpns_w32(priv, SE_NAT_CLEAR, 0x7ff);
 	mutex_unlock(&nat->lock);
 	priv->nat = NULL;
