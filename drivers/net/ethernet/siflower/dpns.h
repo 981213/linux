@@ -3,7 +3,11 @@
 #include <asm/mmio.h>
 #include <linux/clk.h>
 #include <linux/device.h>
+#include <linux/mutex.h>
 #include <linux/reset.h>
+
+struct dpns_l2;
+struct dpns_switchdev;
 
 #define PKT_ERR_STG_CFG2		0x80038
 #define  ARP_REPLY_ERR_OP		GENMASK(18, 16)
@@ -31,6 +35,10 @@ struct dpns_priv {
 	struct reset_control *npu_rst;
 	struct device *dev;
 	struct dentry *debugfs;
+	/* Serializes the Search Engine's shared indirect table window. */
+	struct mutex table_lock;
+	struct dpns_l2 *l2;
+	struct dpns_switchdev *switchdev;
 };
 
 static inline u32 dpns_r32(struct dpns_priv *priv, unsigned reg)
@@ -54,6 +62,11 @@ static inline void dpns_rmw(struct dpns_priv *priv, unsigned reg, u32 clr,
 
 int dpns_se_init(struct dpns_priv *priv);
 int dpns_tmu_init(struct dpns_priv *priv);
+int dpns_l2_init(struct dpns_priv *priv);
+void dpns_l2_fini(struct dpns_priv *priv);
+int dpns_vlan_init(struct dpns_priv *priv);
+int dpns_switchdev_init(struct dpns_priv *priv);
+void dpns_switchdev_fini(struct dpns_priv *priv);
 void sf_dpns_debugfs_init(struct dpns_priv *priv);
 
 #endif /* __SF_DPNS_H__ */

@@ -13,6 +13,7 @@ if NET_VENDOR_SIFLOWER
 config NET_SIFLOWER_ETH_DPNS
 	tristate "Siflower DPNS driver"
 	default y
+	select NET_SWITCHDEV
 	help
 	  Support the Dataplane network subsystem of SiFlower SF21A6826/SF21H8898 SoC.
 

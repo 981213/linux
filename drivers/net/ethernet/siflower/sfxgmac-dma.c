@@ -9,6 +9,7 @@
 #include <net/page_pool/helpers.h>
 
 #include "sfxgmac-ext.h"
+#include "sf_dpns_port.h"
 #include "dma.h"
 #include "eth.h"
 
@@ -160,6 +161,7 @@ static int xgmac_dma_poll_rx(struct xgmac_rxq *rxq, int budget)
 		u32 len, rdes0, rdes2, rdes3, rdes_ctx0, rdes_ctx1, rdes_ctx2, rdes_ctx3, sta_index, rpt_index;
 		struct xgmac_dma_rx_buffer *buf;
 		register struct xgmac_dma_desc_rx rx;
+		struct gmac_common *gmac;
 		struct net_device *netdev;
 		struct sk_buff *skb;
 		unsigned int entry;
@@ -194,6 +196,7 @@ static int xgmac_dma_poll_rx(struct xgmac_rxq *rxq, int budget)
 		netdev = priv->ndevs[id];
 		if (unlikely(!netdev))
 			continue;
+		gmac = netdev_priv(netdev);
 
 		/* When memory is tight, the buf->addr may be empty */
 		if (unlikely(!buf->page))
@@ -241,6 +244,8 @@ static int xgmac_dma_poll_rx(struct xgmac_rxq *rxq, int budget)
 
 		skb_record_rx_queue(skb, rxq->idx);
 		skb->protocol = eth_type_trans(skb, netdev);
+		if (!up_reason && sf_dpns_port_offload_fwd_mark(gmac->dp_port))
+			skb->offload_fwd_mark = 1;
 		napi_gro_receive(&rxq->napi, skb);
 	}
 

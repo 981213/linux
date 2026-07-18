@@ -1,18 +1,17 @@
-#include "linux/delay.h"
-#include "linux/reset.h"
+// SPDX-License-Identifier: GPL-2.0
 #include <linux/bitfield.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
+#include <linux/delay.h>
+#include <linux/device.h>
 #include <linux/iopoll.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/platform_device.h>
 #include <linux/of_platform.h>
-#include <linux/device.h>
-#include <linux/debugfs.h>
+#include <linux/platform_device.h>
+#include <linux/reset.h>
+
 #include "dpns.h"
-
-
-
 static int dpns_probe(struct platform_device *pdev)
 {
 	struct dpns_priv *priv;
@@ -22,6 +21,7 @@ static int dpns_probe(struct platform_device *pdev)
 	if (!priv)
 		return -ENOMEM;
 	priv->dev = &pdev->dev;
+	mutex_init(&priv->table_lock);
 	priv->ioaddr = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(priv->ioaddr))
 		return PTR_ERR(priv->ioaddr);
@@ -45,13 +45,34 @@ static int dpns_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(priv->dev, ret, "failed to initialize TMU.\n");
 
+	ret = dpns_vlan_init(priv);
+	if (ret)
+		return dev_err_probe(priv->dev, ret,
+				     "failed to initialize VLAN engine.\n");
+
+	ret = dpns_l2_init(priv);
+	if (ret)
+		return dev_err_probe(priv->dev, ret,
+				     "failed to initialize L2 engine.\n");
+
+	ret = dpns_switchdev_init(priv);
+	if (ret) {
+		dpns_l2_fini(priv);
+		return dev_err_probe(priv->dev, ret,
+				     "failed to initialize switchdev.\n");
+	}
+
 	sf_dpns_debugfs_init(priv);
 	platform_set_drvdata(pdev, priv);
 	return 0;
 }
 
-static void dpns_remove(struct platform_device *pdev) {
+static void dpns_remove(struct platform_device *pdev)
+{
 	struct dpns_priv *priv = platform_get_drvdata(pdev);
+
+	dpns_switchdev_fini(priv);
+	dpns_l2_fini(priv);
 	debugfs_remove_recursive(priv->debugfs);
 	reset_control_assert(priv->npu_rst);
 }
@@ -74,4 +95,4 @@ module_platform_driver(dpns_driver);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Qingfang Deng <qingfang.deng@siflower.com.cn>");
-MODULE_DESCRIPTION("NPU stub driver for SF21A6826/SF21H8898 SoC");
+MODULE_DESCRIPTION("Data Plane Network Subsystem driver for SF21 SoCs");

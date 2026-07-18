@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __SF_DPNS_SE_H__
 #define __SF_DPNS_SE_H__
 #include "dpns.h"
@@ -74,4 +75,4 @@
 #define  SE_TCAM_CLR_ACL_SPL		BIT(5)
 #define  SE_TCAM_CLR_BLK(x)		BIT(x)
 
-#endif
+#endif /* __SF_DPNS_SE_H__ */

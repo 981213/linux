@@ -14,6 +14,7 @@
 #include "dma.h"
 #include "eth.h"
 #include "sfxgmac-ext.h"
+#include "sf_dpns_port.h"
 
 struct xgmac_mib_desc {
 	char name[ETH_GSTRING_LEN];
@@ -1259,6 +1260,14 @@ static int xgmac_probe(struct platform_device *pdev)
 	if (ret)
 		goto phy_cleanup;
 
+	priv->dp_port = sf_dpns_port_register(ndev, priv->id);
+	if (IS_ERR(priv->dp_port)) {
+		ret = PTR_ERR(priv->dp_port);
+		priv->dp_port = NULL;
+		unregister_netdev(ndev);
+		goto phy_cleanup;
+	}
+
 	return 0;
 phy_cleanup:
 	phylink_destroy(priv->phylink);
@@ -1273,6 +1282,7 @@ static void xgmac_remove(struct platform_device *pdev)
 	struct xgmac_priv *priv = netdev_priv(dev);
 
 	unregister_netdev(dev);
+	sf_dpns_port_unregister(priv->dp_port);
 	phylink_destroy(priv->phylink);
 	if (priv->pcs_dev)
 		xpcs_port_put(priv->pcs_dev);
