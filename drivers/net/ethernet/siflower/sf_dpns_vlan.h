@@ -18,7 +18,8 @@ enum dpns_vlan_stp_state {
 };
 
 int dpns_vlan_port_config(struct dpns_priv *priv, unsigned int port,
-			  bool bridge, bool learning, bool vlan_aware,
+			  bool bridge, bool learning, bool ingress_drop,
+			  bool vlan_aware,
 			  u16 pvid);
 int dpns_vlan_entry_write(struct dpns_priv *priv, unsigned int index,
 			  u16 vid, u32 members, u32 untagged,

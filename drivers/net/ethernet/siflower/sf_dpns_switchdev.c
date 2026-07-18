@@ -17,6 +17,7 @@
 #include <linux/rtnetlink.h>
 #include <linux/slab.h>
 #include <linux/workqueue.h>
+#include <net/pkt_cls.h>
 #include <net/switchdev.h>
 
 #include "dpns.h"
@@ -45,6 +46,8 @@ struct dpns_port {
 	u16 pvid;
 	unsigned long bridge_flags;
 	bool offload_fwd_mark;
+	bool ingress_drop;
+	unsigned long ingress_drop_cookie;
 };
 
 struct dpns_switchdev {
@@ -61,6 +64,7 @@ struct dpns_switchdev {
 	struct notifier_block switchdev_nb;
 	struct notifier_block switchdev_blocking_nb;
 	struct workqueue_struct *fdb_wq;
+	struct list_head block_cb_list;
 };
 
 struct dpns_fdb_work {
@@ -167,6 +171,7 @@ static int dpns_switchdev_apply(struct dpns_switchdev *sw)
 		if (port)
 			stp[i] = dpns_stp_state(port->stp_state);
 		ret = dpns_vlan_port_config(sw->priv, i, bridged, learning,
+					    port && port->ingress_drop,
 					    sw->vlan_filtering,
 					    sw->vlan_filtering && bridged ?
 					    port->pvid : 0);
@@ -689,6 +694,108 @@ int sf_dpns_port_id_by_ifindex(int ifindex, u8 *id)
 	return -EOPNOTSUPP;
 }
 
+static int dpns_matchall_replace(struct dpns_port *port,
+				 struct tc_cls_matchall_offload *f)
+{
+	struct flow_action *action = &f->rule->action;
+	struct netlink_ext_ack *extack = f->common.extack;
+	int ret;
+
+	if (f->common.protocol != htons(ETH_P_ALL)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "DPNS matchall requires protocol all");
+		return -EOPNOTSUPP;
+	}
+	if (f->common.chain_index) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "DPNS matchall supports only chain 0");
+		return -EOPNOTSUPP;
+	}
+	if (!flow_offload_has_one_action(action) ||
+	    action->entries[0].id != FLOW_ACTION_DROP) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "DPNS matchall supports only one drop action");
+		return -EOPNOTSUPP;
+	}
+
+	mutex_lock(&port->sw->lock);
+	if (port->ingress_drop) {
+		if (port->ingress_drop_cookie != f->cookie) {
+			NL_SET_ERR_MSG_MOD(extack,
+					   "DPNS supports one ingress matchall rule per port");
+			ret = -EEXIST;
+		} else {
+			ret = 0;
+		}
+		goto unlock;
+	}
+	port->ingress_drop = true;
+	port->ingress_drop_cookie = f->cookie;
+	ret = dpns_switchdev_apply(port->sw);
+	if (ret) {
+		port->ingress_drop = false;
+		port->ingress_drop_cookie = 0;
+	}
+unlock:
+	mutex_unlock(&port->sw->lock);
+	return ret;
+}
+
+static int dpns_matchall_destroy(struct dpns_port *port,
+				 struct tc_cls_matchall_offload *f)
+{
+	int ret;
+
+	mutex_lock(&port->sw->lock);
+	if (!port->ingress_drop || port->ingress_drop_cookie != f->cookie) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+	port->ingress_drop = false;
+	port->ingress_drop_cookie = 0;
+	ret = dpns_switchdev_apply(port->sw);
+	if (ret) {
+		port->ingress_drop = true;
+		port->ingress_drop_cookie = f->cookie;
+	}
+unlock:
+	mutex_unlock(&port->sw->lock);
+	return ret;
+}
+
+static int dpns_matchall_setup(struct dpns_port *port,
+			       struct tc_cls_matchall_offload *f)
+{
+	switch (f->command) {
+	case TC_CLSMATCHALL_REPLACE:
+		return dpns_matchall_replace(port, f);
+	case TC_CLSMATCHALL_DESTROY:
+		return dpns_matchall_destroy(port, f);
+	case TC_CLSMATCHALL_STATS:
+		/* The per-port action has no per-rule packet counter. */
+		return 0;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int dpns_block_cb(enum tc_setup_type type, void *type_data,
+			 void *cb_priv)
+{
+	struct dpns_port *port = cb_priv;
+
+	if (type != TC_SETUP_CLSMATCHALL)
+		return -EOPNOTSUPP;
+	return dpns_matchall_setup(port, type_data);
+}
+
+static int dpns_setup_block(struct dpns_port *port,
+			    struct flow_block_offload *f)
+{
+	return flow_block_cb_setup_simple(f, &port->sw->block_cb_list,
+					  dpns_block_cb, port, port, true);
+}
+
 int sf_dpns_port_setup_tc(struct dpns_port *port, enum tc_setup_type type,
 			  void *type_data)
 {
@@ -696,6 +803,8 @@ int sf_dpns_port_setup_tc(struct dpns_port *port, enum tc_setup_type type,
 		return -EOPNOTSUPP;
 
 	switch (type) {
+	case TC_SETUP_BLOCK:
+		return dpns_setup_block(port, type_data);
 	case TC_SETUP_FT:
 		return dpns_nat_setup_tc(port->sw->priv, port, type, type_data);
 	case TC_SETUP_QDISC_TBF:
@@ -717,6 +826,7 @@ int dpns_switchdev_init(struct dpns_priv *priv)
 		return -ENOMEM;
 	sw->priv = priv;
 	mutex_init(&sw->lock);
+	INIT_LIST_HEAD(&sw->block_cb_list);
 	sw->fdb_wq = alloc_ordered_workqueue("sf_dpns_fdb", WQ_MEM_RECLAIM);
 	if (!sw->fdb_wq)
 		return -ENOMEM;

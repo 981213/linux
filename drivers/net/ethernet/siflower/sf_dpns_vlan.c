@@ -8,8 +8,10 @@
  * row containing membership and per-port spanning-tree state.  The matching
  * egress VID row supplies the destination and untagged bitmaps.  Global setup
  * enables both lookup banks, installs 802.1Q TPIDs and four tag-edit action
- * rows tailored to the physical L2 datapath.  Configuration proceeds
- * port/PVID first, ingress membership second, and egress membership last.
+ * rows tailored to the physical L2 datapath.  An ingress matchall DROP
+ * overrides the normal CPU/forward action in that physical port's row.
+ * Configuration proceeds port/PVID first, ingress membership second, and
+ * egress membership last.
  */
 
 #include <linux/bitfield.h>
@@ -63,7 +65,7 @@ enum dpns_evlan_action {
 };
 
 static int dpns_vlan_write_iport(struct dpns_priv *priv, unsigned int port,
-				 bool bridge, bool learning)
+				 bool bridge, bool learning, bool drop)
 {
 	u32 row = 0;
 
@@ -72,7 +74,7 @@ static int dpns_vlan_write_iport(struct dpns_priv *priv, unsigned int port,
 	dpns_table_field_set(&row, 10, 5, DPNS_HOST_PORT);
 	dpns_table_field_set(&row, 15, 2, learning ?
 			     DPNS_LEARNING_TO_CPU : DPNS_NO_LEARNING_ACCEPT);
-	dpns_table_field_set(&row, 17, 2, bridge ?
+	dpns_table_field_set(&row, 17, 2, drop ? DPNS_IPORT_DROP : bridge ?
 			     DPNS_IPORT_FORWARD : DPNS_IPORT_CPU);
 	dpns_table_field_set(&row, 19, 1, 1);
 
@@ -122,7 +124,8 @@ static int dpns_vlan_write_egress_xlt(struct dpns_priv *priv,
 }
 
 int dpns_vlan_port_config(struct dpns_priv *priv, unsigned int port,
-			  bool bridge, bool learning, bool vlan_aware,
+			  bool bridge, bool learning, bool ingress_drop,
+			  bool vlan_aware,
 			  u16 pvid)
 {
 	int ret;
@@ -137,7 +140,8 @@ int dpns_vlan_port_config(struct dpns_priv *priv, unsigned int port,
 	if (ret)
 		return ret;
 
-	return dpns_vlan_write_iport(priv, port, bridge, learning);
+	return dpns_vlan_write_iport(priv, port, bridge, learning,
+				     ingress_drop);
 }
 
 static int dpns_vlan_write_ingress(struct dpns_priv *priv, unsigned int index,
@@ -288,7 +292,8 @@ int dpns_vlan_init(struct dpns_priv *priv)
 	}
 
 	for (port = 0; port < DPNS_PHYS_PORTS; port++) {
-		ret = dpns_vlan_port_config(priv, port, false, false, false, 0);
+		ret = dpns_vlan_port_config(priv, port, false, false, false,
+					    false, 0);
 		if (ret)
 			return ret;
 	}
