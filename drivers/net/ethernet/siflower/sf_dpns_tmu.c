@@ -1,6 +1,26 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * SF21 DPNS Traffic Management Unit.
+ *
+ * Each of the ten TMU ports has eight packet queues, two schedulers and six
+ * token-bucket shapers. Scheduler 0 collects queues 0..3; scheduler 1 merges
+ * that output with queues 4..7 and feeds the physical port. A shaper's
+ * location field selects a queue or scheduler output, with location 9 being
+ * the final scheduler-1 output. The dequeue stage counts 24 bytes of Ethernet
+ * preamble, FCS and inter-packet gap in addition to the frame length.
+ *
+ * Initialization resets queue thresholds, builds the two-level strict-
+ * priority scheduler and leaves all shapers disabled. To offload a root TBF,
+ * software disables shaper 5, programs its fixed-point byte credit rate and
+ * burst ceiling, attaches it to location 9, then enables it. Teardown disables
+ * the shaper first so partially updated rate parameters can never take effect.
+ */
+
 #include <linux/of_device.h>
 #include <linux/errno.h>
 #include <linux/init.h>
+#include <linux/math64.h>
+#include <linux/mutex.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -8,8 +28,26 @@
 #include <linux/platform_device.h>
 #include <linux/debugfs.h>
 #include <linux/io.h>
+#include <net/pkt_cls.h>
+
 #include "dpns.h"
 #include "sf_dpns_tmu.h"
+#include "sf_dpns_vlan.h"
+
+#define DPNS_TMU_ROOT_SHAPER 5
+#define DPNS_TMU_PORT_OUTPUT 9
+#define DPNS_TMU_MIN_CREDIT_DEFAULT 0x0003ff00
+
+struct dpns_tmu_port {
+	u32 tbf_handle;
+};
+
+struct dpns_tmu {
+	struct dpns_priv *priv;
+	/* Serializes qdisc state and each shaper's multi-register update. */
+	struct mutex lock;
+	struct dpns_tmu_port ports[TMU_MAX_PORT_CNT];
+};
 
 static u32 tmu_rm32(struct dpns_priv *priv, u32 reg, u32 mask, u32 shift)
 {
@@ -22,7 +60,8 @@ static u32 tmu_rm32(struct dpns_priv *priv, u32 reg, u32 mask, u32 shift)
 	return t;
 }
 
-static void tmu_rmw32(struct dpns_priv *priv, u32 reg, u32 mask, u32 shift, u32 val)
+static void tmu_rmw32(struct dpns_priv *priv, u32 reg, u32 mask, u32 shift,
+		      u32 val)
 {
 	u32 t;
 
@@ -75,7 +114,8 @@ static int tmu_port_writel(struct dpns_priv *priv, u32 port, u32 reg, u32 val)
 	return 0;
 }
 
-static int tmu_port_rm32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask, u32 shift, u32 *val)
+static int tmu_port_rm32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask,
+			 u32 shift, u32 *val)
 {
 	if (!is_valid_port_idx(priv, port))
 		return -EINVAL;
@@ -84,7 +124,8 @@ static int tmu_port_rm32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask, u3
 	return 0;
 }
 
-static int tmu_port_rmw32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask, u32 shift, u32 val)
+static int tmu_port_rmw32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask,
+			  u32 shift, u32 val)
 {
 	if (!is_valid_port_idx(priv, port))
 		return -EINVAL;
@@ -94,7 +135,8 @@ static int tmu_port_rmw32(struct dpns_priv *priv, u32 port, u32 reg, u32 mask, u
 	return 0;
 }
 
-static int tmu_queue_writel(struct dpns_priv *priv, u32 port, u32 queue, u32 reg, u32 val)
+static int tmu_queue_writel(struct dpns_priv *priv, u32 port, u32 queue,
+			    u32 reg, u32 val)
 {
 	if (!is_valid_queue_idx(queue))
 		return -EINVAL;
@@ -102,7 +144,8 @@ static int tmu_queue_writel(struct dpns_priv *priv, u32 port, u32 queue, u32 reg
 	return tmu_port_writel(priv, port, TMU_QUEUE_BASE(queue) + reg, val);
 }
 
-static int tmu_sched_writel(struct dpns_priv *priv, u32 port, u32 sched, u32 reg, u32 val)
+static int tmu_sched_writel(struct dpns_priv *priv, u32 port, u32 sched,
+			    u32 reg, u32 val)
 {
 	if (!is_valid_sched_idx(priv, sched))
 		return -EINVAL;
@@ -110,7 +153,8 @@ static int tmu_sched_writel(struct dpns_priv *priv, u32 port, u32 sched, u32 reg
 	return tmu_port_writel(priv, port, TMU_SCHED_BASE(sched) + reg, val);
 }
 
-static int tmu_shaper_writel(struct dpns_priv *priv, u32 port, u32 shaper, u32 reg, u32 val)
+static int tmu_shaper_writel(struct dpns_priv *priv, u32 port, u32 shaper,
+			     u32 reg, u32 val)
 {
 	if (!is_valid_shaper_idx(priv, shaper))
 		return -EINVAL;
@@ -118,12 +162,14 @@ static int tmu_shaper_writel(struct dpns_priv *priv, u32 port, u32 shaper, u32 r
 	return tmu_port_writel(priv, port, TMU_SHAPER_BASE(shaper) + reg, val);
 }
 
-static int tmu_shaper_rmw32(struct dpns_priv *priv, u32 port, u32 shaper, u32 reg, u32 mask, u32 shift, u32 val)
+static int tmu_shaper_rmw32(struct dpns_priv *priv, u32 port, u32 shaper,
+			    u32 reg, u32 mask, u32 shift, u32 val)
 {
 	if (!is_valid_shaper_idx(priv, shaper))
 		return -EINVAL;
 
-	return tmu_port_rmw32(priv, port, TMU_SHAPER_BASE(shaper) + reg, mask, shift, val);
+	return tmu_port_rmw32(priv, port, TMU_SHAPER_BASE(shaper) + reg, mask,
+			      shift, val);
 }
 
 static int tdq_ctrl_is_configurable(struct dpns_priv *priv, u32 port)
@@ -131,13 +177,10 @@ static int tdq_ctrl_is_configurable(struct dpns_priv *priv, u32 port)
 	u32 val = 0;
 	int err;
 
-	if ((err = tmu_port_rm32(priv, port,
-	                         TMU_TDQ_CTRL,
-	                         TMU_TDQ_ALLOW_CFG,
-	                         TMU_TDQ_ALLOW_CFG_SHIFT,
-	                         &val))) {
+	err = tmu_port_rm32(priv, port, TMU_TDQ_CTRL, TMU_TDQ_ALLOW_CFG,
+			    TMU_TDQ_ALLOW_CFG_SHIFT, &val);
+	if (err)
 		return 0;
-	}
 
 	return val;
 }
@@ -147,63 +190,89 @@ static void tmu_port_queue_cfg(struct dpns_priv *priv, u32 port)
 	int comp;
 
 	for (comp = 0; comp < QUE_MAX_NUM_PER_PORT; comp++) {
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG0, 0x00011f00);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG0,
+				 0x00011f00);
 
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG1, 0x00000000);
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG2, 0x00000000);
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS0, 0x00000000);
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS1, 0x00000000);
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS2, 0x00000000);
-		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG3, 0x000005ee);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG1,
+				 0x00000000);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG2,
+				 0x00000000);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS0,
+				 0x00000000);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS1,
+				 0x00000000);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_STS2,
+				 0x00000000);
+		tmu_queue_writel(priv, port, comp, TMU_PORT_QUEUE_CFG3,
+				 0x000005ee);
 	}
 }
 
 static void tmu_port_sched_cfg(struct dpns_priv *priv, u32 port)
 {
 	int comp;
+
 	for (comp = 0; comp < QUE_SCH_NUM_PER_PORT; comp++) {
-		tmu_sched_writel(priv, port, comp, TMU_SCH_CTRL,      0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q0_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q1_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q2_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q3_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q4_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q5_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q6_WEIGHT, 0x00000000);
-		tmu_sched_writel(priv, port, comp, TMU_SCH_Q7_WEIGHT, 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_CTRL, 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q0_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q1_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q2_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q3_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q4_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q5_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q6_WEIGHT,
+				 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_Q7_WEIGHT,
+				 0x00000000);
 
 		switch (comp) {
 		case 0:
-			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC0, 0x03020100);
-			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC1, 0x08080808);
+			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC0,
+					 0x03020100);
+			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC1,
+					 0x08080808);
 			break;
 
 		case 1:
-			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC0, 0x06050400);
-			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC1, 0x08080807);
+			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC0,
+					 0x06050400);
+			tmu_sched_writel(priv, port, comp, TMU_SCH_QUEUE_ALLOC1,
+					 0x08080807);
 			break;
 
 		default:
 			break;
 		}
 
-		tmu_sched_writel(priv, port, comp, TMU_SCH_BIT_RATE, 0x00000000);
+		tmu_sched_writel(priv, port, comp, TMU_SCH_BIT_RATE,
+				 0x00000000);
 
 		if (comp == 0)
-			tmu_sched_writel(priv, port, comp, TMU_SCH0_POS, 0x00000000);
+			tmu_sched_writel(priv, port, comp, TMU_SCH0_POS,
+					 0x00000000);
 	}
 }
 
 static void tmu_port_shaper_cfg(struct dpns_priv *priv, u32 port)
 {
 	int comp;
+
 	for (comp = 0; comp < QUE_SHAPER_NUM_PER_PORT; comp++) {
-		tmu_shaper_writel(priv, port, comp, TMU_SHP_CTRL,       0x00000000);
-		tmu_shaper_writel(priv, port, comp, TMU_SHP_WEIGHT,     0x00000000);
-		tmu_shaper_writel(priv, port, comp, TMU_SHP_CTRL2,      0x00000000);
-		tmu_shaper_writel(priv, port, comp, TMU_SHP_MIN_CREDIT, 0x0003ff00);
-		tmu_shaper_writel(priv, port, comp, TMU_SHP_MAX_CREDIT, 0x00000400);
-		tmu_shaper_rmw32(priv, port, comp, TMU_SHP_CTRL2, TMU_SHP_POS, TMU_SHP_POS_SHIFT, comp);
+		tmu_shaper_writel(priv, port, comp, TMU_SHP_CTRL, 0x00000000);
+		tmu_shaper_writel(priv, port, comp, TMU_SHP_WEIGHT, 0x00000000);
+		tmu_shaper_writel(priv, port, comp, TMU_SHP_CTRL2, 0x00000000);
+		tmu_shaper_writel(priv, port, comp, TMU_SHP_MIN_CREDIT,
+				  0x0003ff00);
+		tmu_shaper_writel(priv, port, comp, TMU_SHP_MAX_CREDIT,
+				  0x00000400);
+		tmu_shaper_rmw32(priv, port, comp, TMU_SHP_CTRL2, TMU_SHP_POS,
+				 TMU_SHP_POS_SHIFT, comp);
 	}
 }
 
@@ -213,8 +282,7 @@ static void _tmu_reset(struct dpns_priv *priv, u32 port)
 	tmu_port_sched_cfg(priv, port);
 	tmu_port_shaper_cfg(priv, port);
 
-	// Cause tmu shaper rate limit not include pkt preamble(8byte)/IFG(12byte)/FCS(4Byte)
-	// so config 24 byte here
+	/* Include the preamble, FCS and inter-packet gap in shaper rates. */
 	tmu_port_writel(priv, port, TMU_TDQ_IFG, 0x00000018);
 
 	if (tdq_ctrl_is_configurable(priv, port))
@@ -229,19 +297,149 @@ static int tmu_reset(struct dpns_priv *priv)
 	dpns_w32(priv, TMU_LLM_FIFO_CTRL0, 0x07fe07ff);
 	dpns_w32(priv, TMU_LLM_FIFO_CTRL1, 0x00280024);
 
-	for (port = 0; port < TMU_MAX_PORT_CNT; port++) {
+	for (port = 0; port < TMU_MAX_PORT_CNT; port++)
 		_tmu_reset(priv, port);
-	}
 
 	return 0;
 }
 
+static void dpns_tmu_tbf_disable(struct dpns_tmu *tmu, u8 port)
+{
+	struct dpns_priv *priv = tmu->priv;
+
+	tmu_shaper_writel(priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL, 0);
+	tmu_shaper_writel(priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_WEIGHT, 0);
+	tmu->ports[port].tbf_handle = 0;
+}
+
+static int dpns_tmu_rate_cfg(struct dpns_tmu *tmu, u64 rate, u32 *ctrl,
+			     u32 *weight)
+{
+	u64 clk = clk_get_rate(tmu->priv->clk);
+	u64 scaled;
+	int div;
+
+	if (!clk || !rate)
+		return -EINVAL;
+
+	/* The 20-bit weight is an unsigned 8.12 byte value. Pick the
+	 * largest divider that fits to retain the greatest precision.
+	 */
+	for (div = TMU_SHP_CLKDIV_MAX; div >= 0; div--) {
+		scaled = DIV_ROUND_CLOSEST_ULL(rate << (div + 13), clk);
+		if (scaled && scaled <= GENMASK(19, 0)) {
+			*ctrl = FIELD_PREP(TMU_SHP_CLK_DIV, div) | TMU_SHP_EN;
+			*weight = scaled;
+			return 0;
+		}
+	}
+
+	return -ERANGE;
+}
+
+static int dpns_tmu_tbf_replace(struct dpns_tmu *tmu, u8 port,
+				struct tc_tbf_qopt_offload *qopt)
+{
+	const struct tc_tbf_qopt_offload_replace_params *params =
+		&qopt->replace_params;
+	u32 ctrl, ctrl2, max_credit, weight;
+	int ret;
+
+	if (qopt->parent != TC_H_ROOT)
+		return -EOPNOTSUPP;
+	if (params->rate.linklayer == TC_LINKLAYER_ATM ||
+	    params->rate.overhead || params->rate.mpu)
+		return -EOPNOTSUPP;
+	if (!params->max_size ||
+	    params->max_size > FIELD_MAX(TMU_SHP_MAX_CREDIT_MASK))
+		return -ERANGE;
+
+	ret = dpns_tmu_rate_cfg(tmu, params->rate.rate_bytes_ps, &ctrl,
+				&weight);
+	if (ret)
+		return ret;
+
+	max_credit = FIELD_PREP(TMU_SHP_MAX_CREDIT_MASK, params->max_size);
+	ctrl2 = FIELD_PREP(TMU_SHP_POS, DPNS_TMU_PORT_OUTPUT) |
+		FIELD_PREP(TMU_SHP_BIT_RATE, TMU_SHP_SCHED_PKT_LEN) |
+		FIELD_PREP(TMU_SHP_MODE, TMU_SHP_MODE_KEEP_CREDIT);
+
+	/* Disable first: CTRL is also the commit point for a new rate. */
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL,
+			  0);
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_WEIGHT,
+			  weight);
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER,
+			  TMU_SHP_MAX_CREDIT, max_credit);
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER,
+			  TMU_SHP_MIN_CREDIT, DPNS_TMU_MIN_CREDIT_DEFAULT);
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL2,
+			  ctrl2);
+	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL,
+			  ctrl);
+	tmu->ports[port].tbf_handle = qopt->handle;
+
+	return 0;
+}
+
+int dpns_tmu_setup_tc(struct dpns_priv *priv, u8 port, enum tc_setup_type type,
+		      void *type_data)
+{
+	struct tc_tbf_qopt_offload *qopt = type_data;
+	struct dpns_tmu *tmu = priv->tmu;
+	int ret;
+
+	if (!tmu || port >= DPNS_PHYS_PORTS || type != TC_SETUP_QDISC_TBF)
+		return -EOPNOTSUPP;
+
+	mutex_lock(&tmu->lock);
+	switch (qopt->command) {
+	case TC_TBF_REPLACE:
+		ret = dpns_tmu_tbf_replace(tmu, port, qopt);
+		break;
+	case TC_TBF_DESTROY:
+		if (tmu->ports[port].tbf_handle == qopt->handle)
+			dpns_tmu_tbf_disable(tmu, port);
+		ret = 0;
+		break;
+	default:
+		ret = -EOPNOTSUPP;
+		break;
+	}
+	mutex_unlock(&tmu->lock);
+
+	return ret;
+}
+
 int dpns_tmu_init(struct dpns_priv *priv)
 {
-	int err;
+	struct dpns_tmu *tmu;
+	int ret;
 
-	if ((err = tmu_reset(priv)) != 0)
-		return err;
+	tmu = devm_kzalloc(priv->dev, sizeof(*tmu), GFP_KERNEL);
+	if (!tmu)
+		return -ENOMEM;
+	tmu->priv = priv;
+	mutex_init(&tmu->lock);
 
-	return err;
+	ret = tmu_reset(priv);
+	if (ret)
+		return ret;
+	priv->tmu = tmu;
+
+	return 0;
+}
+
+void dpns_tmu_fini(struct dpns_priv *priv)
+{
+	struct dpns_tmu *tmu = priv->tmu;
+	unsigned int port;
+
+	if (!tmu)
+		return;
+	mutex_lock(&tmu->lock);
+	for (port = 0; port < DPNS_PHYS_PORTS; port++)
+		dpns_tmu_tbf_disable(tmu, port);
+	mutex_unlock(&tmu->lock);
+	priv->tmu = NULL;
 }

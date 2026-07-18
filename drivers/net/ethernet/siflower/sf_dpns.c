@@ -93,6 +93,7 @@ static void dpns_remove(struct platform_device *pdev)
 	dpns_nat_fini(priv);
 	dpns_intf_fini(priv);
 	dpns_l2_fini(priv);
+	dpns_tmu_fini(priv);
 	debugfs_remove_recursive(priv->debugfs);
 	reset_control_assert(priv->npu_rst);
 }

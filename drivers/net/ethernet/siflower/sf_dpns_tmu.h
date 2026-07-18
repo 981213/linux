@@ -1,6 +1,11 @@
+/* SPDX-License-Identifier: GPL-2.0 */
 #ifndef __SF_TMU_H__
 #define __SF_TMU_H__
 #include <linux/bitfield.h>
+#include <linux/netdevice.h>
+
+struct dpns_priv;
+
 // npu clk is 400MHz in mpw, will change to 600MHz in fullmask
 // TODO: should use mpw define to diff
 #define LIF_SHP_CLKDIV_DEF      (3)
@@ -209,7 +214,7 @@
 
 #define TMU_SHP_MAX_CREDIT		0x08
 #define TMU_SHP_MAX_CREDIT_SHIFT	10
-#define TMU_SHP_MAX_CREDIT_MASK		GENMASK(31, 10)
+#define TMU_SHP_MAX_CREDIT_MASK		GENMASK(21, 10)
 
 // (fraction part num) = (register fraction part) / (2 ^ 12)
 #define TMU_SHP_FRAC_WEIGHT_2DBL(reg)   (((double)(reg)) / (1 << 12))
@@ -271,8 +276,6 @@
 #define TMU_SCHED_BASE(sch)		(TMU_SCH0 + TMU_SCH_SZ * (sch))
 #define TMU_SHAPER_BASE(shp)		(TMU_SHP0 + TMU_SHP_SZ * (shp))
 
-
-
 #define TMU_MAX_PORT_CNT 10
 #define QUE_MAX_NUM_PER_PORT 8
 #define QUE_SHAPER_NUM_PER_PORT 6
@@ -300,6 +303,9 @@ enum TMU_BITRATE_MODE {
 	TMU_BITRATE_PKTCNT,
 	NUM_TMU_BITRATE_MODES,
 };
+
+int dpns_tmu_setup_tc(struct dpns_priv *priv, u8 port,
+		      enum tc_setup_type type, void *type_data);
 
 static const u8 sched_q_weight_regs[] = {
 	TMU_SCH_Q0_WEIGHT,

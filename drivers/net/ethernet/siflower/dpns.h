@@ -11,6 +11,7 @@ struct dpns_intf;
 struct dpns_nat;
 struct dpns_nat_ext;
 struct dpns_switchdev;
+struct dpns_tmu;
 
 #define PKT_ERR_STG_CFG2		0x80038
 #define  ARP_REPLY_ERR_OP		GENMASK(18, 16)
@@ -45,6 +46,7 @@ struct dpns_priv {
 	struct dpns_nat *nat;
 	struct dpns_nat_ext *nat_ext;
 	struct dpns_switchdev *switchdev;
+	struct dpns_tmu *tmu;
 };
 
 static inline u32 dpns_r32(struct dpns_priv *priv, unsigned reg)
@@ -68,6 +70,7 @@ static inline void dpns_rmw(struct dpns_priv *priv, unsigned reg, u32 clr,
 
 int dpns_se_init(struct dpns_priv *priv);
 int dpns_tmu_init(struct dpns_priv *priv);
+void dpns_tmu_fini(struct dpns_priv *priv);
 int dpns_l2_init(struct dpns_priv *priv);
 void dpns_l2_fini(struct dpns_priv *priv);
 int dpns_intf_init(struct dpns_priv *priv);

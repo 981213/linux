@@ -23,6 +23,7 @@
 #include "sf_dpns_l2.h"
 #include "sf_dpns_nat.h"
 #include "sf_dpns_port.h"
+#include "sf_dpns_tmu.h"
 #include "sf_dpns_vlan.h"
 
 #define DPNS_BRIDGE_FLAGS (BR_LEARNING | BR_FLOOD | BR_MCAST_FLOOD | \
@@ -693,7 +694,16 @@ int sf_dpns_port_setup_tc(struct dpns_port *port, enum tc_setup_type type,
 {
 	if (!port)
 		return -EOPNOTSUPP;
-	return dpns_nat_setup_tc(port->sw->priv, port, type, type_data);
+
+	switch (type) {
+	case TC_SETUP_FT:
+		return dpns_nat_setup_tc(port->sw->priv, port, type, type_data);
+	case TC_SETUP_QDISC_TBF:
+		return dpns_tmu_setup_tc(port->sw->priv, port->id, type,
+					 type_data);
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 EXPORT_SYMBOL_GPL(sf_dpns_port_setup_tc);
 
