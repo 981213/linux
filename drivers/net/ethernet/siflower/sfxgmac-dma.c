@@ -1,3 +1,14 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Siflower XGMAC DMA engine
+ *
+ * The DMA engine transfers frames between system memory and an XGMAC through
+ * per-channel TX and RX descriptor rings.  RX context descriptors carry the
+ * parser metadata used for checksum and receive-hash offload.  Setup allocates
+ * the rings and page-pool buffers, programs their base and tail addresses,
+ * then enables the channels; NAPI reclaims completed descriptors and refills
+ * the RX rings while the device is running.
+ */
 #include <linux/clk.h>
 #include <linux/debugfs.h>
 #include <linux/dma-mapping.h>
@@ -101,6 +112,10 @@ xgmac_dma_rx_coe_hash(const struct net_device *dev, struct sk_buff *skb,
 
 	/* Fill in skb->hash */
 	hash = FIELD_GET(XGMAC_RDES1_RXHASH, rdes_ctx1);
+	/* Preserve entropy for reciprocal_scale() users: the hardware hash is
+	 * only 16 bits, while the networking stack treats it as a uniform u32.
+	 */
+	hash |= hash << 16;
 	__skb_set_hash(skb, hash, false, is_l4);
 }
 
