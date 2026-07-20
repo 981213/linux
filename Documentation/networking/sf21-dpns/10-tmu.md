@@ -195,6 +195,8 @@ scheduler 1:
 
 切换到 WFQ、DWRR 或 WRR 前，必须先给该 scheduler 的每个已连接 input 写入非零 weight，再切换 `SCH_CTRL`。已连接 input 保持 weight 0 时，DWRR 可能停止整个 scheduler 的出队。当前资料仍不足以确定各 weighted 算法的 weight 单位及比例换算，不能仅把 Linux ETS quantum 原样写入该寄存器。
 
+物理入口收到的 802.1Q PCP 直接选择同编号的出口 TMU queue：PCP 0～7 分别进入 Q0～Q7。未携带 VLAN tag 的帧进入 Q0；仅设置 IPv4 DSCP 不会改变 queue。由于 PQ 的高编号 input 优先，所以 PCP 7 是最高优先级，PCP 0 是最低优先级。若要从 DSCP 获得硬件队列选择，必须在 parser/IACL/MODIFY 路径中另行配置 DSCP 到内部优先级或 PCP 的映射。
+
 ## Shaper
 
 每个 port 有 6 个 shaper，stride 为 `0x20`：
@@ -290,6 +292,27 @@ tc qdisc del dev eth0 root
 ```
 
 当前实现接受的 `max_size` 上限为 4095 Byte；更大的 burst 会使硬件 offload 被拒绝并由 qdisc 回退到软件路径。当前不支持 ATM linklayer、额外 overhead/mpu，也没有暴露 queue、WFQ/DWRR/WRR/WRED。
+
+## Linux strict-priority 配置
+
+物理端口可以通过 Linux `prio` qdisc 启用两级 PQ。Linux band 0 是最高优先级，而 TMU Q7 是最高优先级，因此只支持 8 个 band 以及如下反向 priomap：
+
+```sh
+tc qdisc replace dev eth0 root handle 1: prio bands 8 \
+  priomap 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+tc qdisc del dev eth0 root
+```
+
+该配置使 Linux priority 0～7 与硬件 PCP/Q0～Q7 保持同一优先级含义，同时把 qdisc band 0～7 对应到 Q7～Q0。其他 band 数或 priomap 不能由现有硬件分类路径准确表达，驱动会拒绝 offload。给 band graft 子 qdisc 也会撤销父 prio 的 offload，因为目前尚未提供 per-queue qdisc offload。
+
+Linux ETS 的 strict-only 子集也由同一 PQ 表达，配置同样必须有 8 个 strict band 和上述反向 priomap：
+
+```sh
+tc qdisc replace dev eth0 root handle 1: ets bands 8 strict 8 \
+  priomap 7 6 5 4 3 2 1 0 7 6 5 4 3 2 1 0
+```
+
+Weighted ETS 需要可信的 quantum-to-weight 换算。当前寄存器资料没有定义 WFQ/DWRR/WRR weight 单位，各 weighted 模式也尚未表现出可重复的比例关系，因此任何带非零 quantum 的 ETS 配置都不会 offload。
 
 ## 推荐调试顺序
 

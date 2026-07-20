@@ -848,6 +848,8 @@ int sf_dpns_port_setup_tc(struct dpns_port *port, enum tc_setup_type type,
 	case TC_SETUP_FT:
 		return dpns_nat_setup_tc(port->sw->priv, port, type, type_data);
 	case TC_SETUP_QDISC_TBF:
+	case TC_SETUP_QDISC_PRIO:
+	case TC_SETUP_QDISC_ETS:
 		return dpns_tmu_setup_tc(port->sw->priv, port->id, type,
 					 type_data);
 	default:

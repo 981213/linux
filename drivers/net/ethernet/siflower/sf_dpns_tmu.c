@@ -14,6 +14,9 @@
  * software disables shaper 0, programs its fixed-point byte credit rate and
  * burst ceiling, attaches it to location 0, then enables it. Teardown disables
  * the shaper first so partially updated rate parameters can never take effect.
+ * Root PRIO and strict-only ETS restore the fixed scheduler connections and
+ * select strict priority after validating that Linux's band map is the exact
+ * reverse of the hardware's Q0-lowest to Q7-highest queue numbering.
  */
 
 #include <linux/of_device.h>
@@ -40,6 +43,8 @@
 
 struct dpns_tmu_port {
 	u32 tbf_handle;
+	u32 prio_handle;
+	u32 ets_handle;
 };
 
 struct dpns_tmu {
@@ -378,29 +383,166 @@ static int dpns_tmu_tbf_replace(struct dpns_tmu *tmu, u8 port,
 	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL,
 			  ctrl);
 	tmu->ports[port].tbf_handle = qopt->handle;
+	tmu->ports[port].prio_handle = 0;
+	tmu->ports[port].ets_handle = 0;
 
 	return 0;
+}
+
+static bool dpns_tmu_prio_map_supported(const u8 *priomap)
+{
+	int prio;
+
+	/* Linux band 0 and TMU queue 7 are both the highest priority.  The
+	 * hardware classifier maps an 802.1p priority directly to the queue
+	 * with the same number, hence the reversed band numbering.
+	 */
+	for (prio = 0; prio <= TC_PRIO_MAX; prio++)
+		if (priomap[prio] != QUE_MAX_NUM_PER_PORT - 1 -
+					     (prio & (QUE_MAX_NUM_PER_PORT - 1)))
+			return false;
+
+	return true;
+}
+
+static int dpns_tmu_prio_replace(struct dpns_tmu *tmu, u8 port,
+				 struct tc_prio_qopt_offload *qopt)
+{
+	const struct tc_prio_qopt_offload_params *params =
+		&qopt->replace_params;
+
+	if (qopt->parent != TC_H_ROOT ||
+	    params->bands != QUE_MAX_NUM_PER_PORT ||
+	    !dpns_tmu_prio_map_supported(params->priomap)) {
+		tmu->ports[port].prio_handle = 0;
+		return -EOPNOTSUPP;
+	}
+
+	/* Restore the fixed two-level topology as well as selecting PQ.  This
+	 * makes replacement independent of any earlier debug register writes.
+	 */
+	if (tmu->ports[port].tbf_handle)
+		dpns_tmu_tbf_disable(tmu, port);
+	tmu_port_sched_cfg(tmu->priv, port);
+	tmu->ports[port].prio_handle = qopt->handle;
+	tmu->ports[port].ets_handle = 0;
+
+	return 0;
+}
+
+static int dpns_tmu_setup_prio(struct dpns_tmu *tmu, u8 port,
+			       struct tc_prio_qopt_offload *qopt)
+{
+	switch (qopt->command) {
+	case TC_PRIO_REPLACE:
+		return dpns_tmu_prio_replace(tmu, port, qopt);
+	case TC_PRIO_DESTROY:
+		if (tmu->ports[port].prio_handle == qopt->handle) {
+			tmu_port_sched_cfg(tmu->priv, port);
+			tmu->ports[port].prio_handle = 0;
+		}
+		return 0;
+	case TC_PRIO_STATS:
+		return tmu->ports[port].prio_handle == qopt->handle ? 0 :
+			-EOPNOTSUPP;
+	case TC_PRIO_GRAFT:
+		if (tmu->ports[port].prio_handle == qopt->handle &&
+		    qopt->graft_params.child_handle)
+			tmu->ports[port].prio_handle = 0;
+		return qopt->graft_params.child_handle ? -EOPNOTSUPP : 0;
+	default:
+		return -EOPNOTSUPP;
+	}
+}
+
+static int dpns_tmu_ets_replace(struct dpns_tmu *tmu, u8 port,
+				struct tc_ets_qopt_offload *qopt)
+{
+	const struct tc_ets_qopt_offload_replace_params *params =
+		&qopt->replace_params;
+	int band;
+
+	if (qopt->parent != TC_H_ROOT ||
+	    params->bands != QUE_MAX_NUM_PER_PORT ||
+	    !dpns_tmu_prio_map_supported(params->priomap))
+		goto unsupported;
+
+	for (band = 0; band < params->bands; band++)
+		if (params->quanta[band])
+			goto unsupported;
+
+	if (tmu->ports[port].tbf_handle)
+		dpns_tmu_tbf_disable(tmu, port);
+	tmu_port_sched_cfg(tmu->priv, port);
+	tmu->ports[port].ets_handle = qopt->handle;
+	tmu->ports[port].prio_handle = 0;
+
+	return 0;
+
+unsupported:
+	tmu->ports[port].ets_handle = 0;
+	return -EOPNOTSUPP;
+}
+
+static int dpns_tmu_setup_ets(struct dpns_tmu *tmu, u8 port,
+			      struct tc_ets_qopt_offload *qopt)
+{
+	switch (qopt->command) {
+	case TC_ETS_REPLACE:
+		return dpns_tmu_ets_replace(tmu, port, qopt);
+	case TC_ETS_DESTROY:
+		if (tmu->ports[port].ets_handle == qopt->handle) {
+			tmu_port_sched_cfg(tmu->priv, port);
+			tmu->ports[port].ets_handle = 0;
+		}
+		return 0;
+	case TC_ETS_STATS:
+		return tmu->ports[port].ets_handle == qopt->handle ? 0 :
+			-EOPNOTSUPP;
+	case TC_ETS_GRAFT:
+		if (tmu->ports[port].ets_handle == qopt->handle &&
+		    qopt->graft_params.child_handle)
+			tmu->ports[port].ets_handle = 0;
+		return qopt->graft_params.child_handle ? -EOPNOTSUPP : 0;
+	default:
+		return -EOPNOTSUPP;
+	}
 }
 
 int dpns_tmu_setup_tc(struct dpns_priv *priv, u8 port, enum tc_setup_type type,
 		      void *type_data)
 {
-	struct tc_tbf_qopt_offload *qopt = type_data;
 	struct dpns_tmu *tmu = priv->tmu;
 	int ret;
 
-	if (!tmu || port >= DPNS_PHYS_PORTS || type != TC_SETUP_QDISC_TBF)
+	if (!tmu || port >= DPNS_PHYS_PORTS)
 		return -EOPNOTSUPP;
 
 	mutex_lock(&tmu->lock);
-	switch (qopt->command) {
-	case TC_TBF_REPLACE:
-		ret = dpns_tmu_tbf_replace(tmu, port, qopt);
+	switch (type) {
+	case TC_SETUP_QDISC_TBF: {
+		struct tc_tbf_qopt_offload *qopt = type_data;
+
+		switch (qopt->command) {
+		case TC_TBF_REPLACE:
+			ret = dpns_tmu_tbf_replace(tmu, port, qopt);
+			break;
+		case TC_TBF_DESTROY:
+			if (tmu->ports[port].tbf_handle == qopt->handle)
+				dpns_tmu_tbf_disable(tmu, port);
+			ret = 0;
+			break;
+		default:
+			ret = -EOPNOTSUPP;
+			break;
+		}
 		break;
-	case TC_TBF_DESTROY:
-		if (tmu->ports[port].tbf_handle == qopt->handle)
-			dpns_tmu_tbf_disable(tmu, port);
-		ret = 0;
+	}
+	case TC_SETUP_QDISC_PRIO:
+		ret = dpns_tmu_setup_prio(tmu, port, type_data);
+		break;
+	case TC_SETUP_QDISC_ETS:
+		ret = dpns_tmu_setup_ets(tmu, port, type_data);
 		break;
 	default:
 		ret = -EOPNOTSUPP;
