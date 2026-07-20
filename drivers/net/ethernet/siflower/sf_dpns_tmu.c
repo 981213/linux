@@ -5,14 +5,14 @@
  * Each of the ten TMU ports has eight packet queues, two schedulers and six
  * token-bucket shapers. Scheduler 0 collects queues 0..3; scheduler 1 merges
  * that output with queues 4..7 and feeds the physical port. A shaper's
- * location field selects a queue or scheduler output, with location 9 being
+ * location field selects a queue or scheduler output, with location 0 being
  * the final scheduler-1 output. The dequeue stage counts 24 bytes of Ethernet
  * preamble, FCS and inter-packet gap in addition to the frame length.
  *
  * Initialization resets queue thresholds, builds the two-level strict-
  * priority scheduler and leaves all shapers disabled. To offload a root TBF,
- * software disables shaper 5, programs its fixed-point byte credit rate and
- * burst ceiling, attaches it to location 9, then enables it. Teardown disables
+ * software disables shaper 0, programs its fixed-point byte credit rate and
+ * burst ceiling, attaches it to location 0, then enables it. Teardown disables
  * the shaper first so partially updated rate parameters can never take effect.
  */
 
@@ -34,8 +34,8 @@
 #include "sf_dpns_tmu.h"
 #include "sf_dpns_vlan.h"
 
-#define DPNS_TMU_ROOT_SHAPER 5
-#define DPNS_TMU_PORT_OUTPUT 9
+#define DPNS_TMU_ROOT_SHAPER 0
+#define DPNS_TMU_PORT_OUTPUT 0
 #define DPNS_TMU_MIN_CREDIT_DEFAULT 0x0003ff00
 
 struct dpns_tmu_port {

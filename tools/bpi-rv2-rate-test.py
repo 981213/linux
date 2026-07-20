@@ -11,7 +11,12 @@ import time
 
 
 ETH_P_ALL = 0x0003
+ETH_P_8021Q = 0x8100
 ETH_P_TEST = 0x88B6
+SOL_PACKET = 263
+PACKET_AUXDATA = 8
+TP_STATUS_VLAN_VALID = 1 << 4
+TP_STATUS_VLAN_TPID_VALID = 1 << 6
 SIOCGIFHWADDR = 0x8927
 MAGIC = b"BPI-RV2-DPNS-RATE"
 
@@ -28,14 +33,53 @@ def packet_socket(ifname, receive=False):
                          socket.htons(ETH_P_ALL))
     if receive:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16 * 1024 * 1024)
+        sock.setsockopt(SOL_PACKET, PACKET_AUXDATA, struct.pack("=I", 1))
         sock.settimeout(0.1)
     sock.bind((ifname, 0))
     return sock
 
 
-def make_frame(src, dst, length):
-    header = dst + src + struct.pack("!H", ETH_P_TEST)
+def receive_frame(sock):
+    frame, ancdata, _flags, _addr = sock.recvmsg(2048, 256)
+    for level, kind, data in ancdata:
+        if level != SOL_PACKET or kind != PACKET_AUXDATA or len(data) < 20:
+            continue
+        status, _length, _snaplen, _mac, _net, tci, tpid = \
+            struct.unpack_from("=IIIHHHH", data)
+        if not status & TP_STATUS_VLAN_VALID:
+            continue
+        if len(frame) >= 14 and struct.unpack_from("!H", frame, 12)[0] != \
+                ETH_P_8021Q:
+            if not status & TP_STATUS_VLAN_TPID_VALID:
+                tpid = ETH_P_8021Q
+            frame = frame[:12] + struct.pack("!HH", tpid, tci) + frame[12:]
+        break
+    return frame
+
+
+def make_frame(src, dst, length, vlan, pcp):
+    header = dst + src
+    if vlan is not None:
+        header += struct.pack("!HH", ETH_P_8021Q, pcp << 13 | vlan)
+    header += struct.pack("!H", ETH_P_TEST)
     return (header + MAGIC).ljust(length, b"\0")
+
+
+def matches(frame, src, dst, vlan, pcp):
+    if len(frame) < 14 or frame[:6] != dst or frame[6:12] != src:
+        return False
+    offset = 12
+    ethertype = struct.unpack_from("!H", frame, offset)[0]
+    offset += 2
+    if vlan is not None:
+        if ethertype != ETH_P_8021Q or len(frame) < 18:
+            return False
+        tci, ethertype = struct.unpack_from("!HH", frame, offset)
+        if tci & 0xfff != vlan:
+            return False
+        offset += 4
+    return ethertype == ETH_P_TEST and \
+        frame[offset:offset + len(MAGIC)] == MAGIC
 
 
 def main():
@@ -45,16 +89,24 @@ def main():
     parser.add_argument("--duration", type=float, default=8.0)
     parser.add_argument("--warmup", type=float, default=1.0)
     parser.add_argument("--length", type=int, default=1400)
+    parser.add_argument("--vlan", type=int)
+    parser.add_argument("--pcp", type=int, default=0)
     args = parser.parse_args()
 
     if args.duration <= 2 * args.warmup:
         parser.error("--duration must exceed twice --warmup")
     if not 60 <= args.length <= 1500:
         parser.error("--length must be in the range 60..1500")
+    if args.vlan is not None and not 1 <= args.vlan <= 4094:
+        parser.error("--vlan must be in the range 1..4094")
+    if not 0 <= args.pcp <= 7:
+        parser.error("--pcp must be in the range 0..7")
+    if args.pcp and args.vlan is None:
+        parser.error("--pcp requires --vlan")
 
     tx_mac = interface_mac(args.tx)
     rx_mac = interface_mac(args.rx)
-    frame = make_frame(tx_mac, rx_mac, args.length)
+    frame = make_frame(tx_mac, rx_mac, args.length, args.vlan, args.pcp)
     start = time.monotonic() + 0.25
     measure_start = start + args.warmup
     end = start + args.duration
@@ -67,15 +119,12 @@ def main():
             nonlocal received
             while time.monotonic() < end + 1:
                 try:
-                    data = rx.recv(2048)
+                    data = receive_frame(rx)
                 except socket.timeout:
                     continue
                 now = time.monotonic()
-                if (measure_start <= now < measure_end and
-                        len(data) >= 14 + len(MAGIC) and
-                        data[:6] == rx_mac and data[6:12] == tx_mac and
-                        struct.unpack_from("!H", data, 12)[0] == ETH_P_TEST and
-                        data[14:14 + len(MAGIC)] == MAGIC):
+                if measure_start <= now < measure_end and \
+                        matches(data, tx_mac, rx_mac, args.vlan, args.pcp):
                     received += 1
 
         thread = threading.Thread(target=receive, daemon=True)
