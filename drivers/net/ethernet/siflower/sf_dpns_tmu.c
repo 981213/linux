@@ -16,7 +16,8 @@
  * the shaper first so partially updated rate parameters can never take effect.
  * Root PRIO and strict-only ETS restore the fixed scheduler connections and
  * select strict priority after validating that Linux's band map is the exact
- * reverse of the hardware's Q0-lowest to Q7-highest queue numbering.
+ * reverse of the hardware's Q0-lowest to Q7-highest queue numbering. TBFs on
+ * their four highest bands use the native per-queue shapers for Q4..Q7.
  */
 
 #include <linux/of_device.h>
@@ -39,12 +40,15 @@
 
 #define DPNS_TMU_ROOT_SHAPER 0
 #define DPNS_TMU_PORT_OUTPUT 0
+#define DPNS_TMU_FIRST_SHAPED_QUEUE 4
+#define DPNS_TMU_QUEUE_SHAPER(queue) ((queue) - 2)
 #define DPNS_TMU_MIN_CREDIT_DEFAULT 0x0003ff00
 
 struct dpns_tmu_port {
 	u32 tbf_handle;
 	u32 prio_handle;
 	u32 ets_handle;
+	u32 queue_tbf_handle[QUE_MAX_NUM_PER_PORT];
 };
 
 struct dpns_tmu {
@@ -308,13 +312,34 @@ static int tmu_reset(struct dpns_priv *priv)
 	return 0;
 }
 
-static void dpns_tmu_tbf_disable(struct dpns_tmu *tmu, u8 port)
+static void dpns_tmu_shaper_disable(struct dpns_tmu *tmu, u8 port, u8 shaper)
 {
 	struct dpns_priv *priv = tmu->priv;
 
-	tmu_shaper_writel(priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL, 0);
-	tmu_shaper_writel(priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_WEIGHT, 0);
+	tmu_shaper_writel(priv, port, shaper, TMU_SHP_CTRL, 0);
+	tmu_shaper_writel(priv, port, shaper, TMU_SHP_WEIGHT, 0);
+}
+
+static void dpns_tmu_tbf_disable(struct dpns_tmu *tmu, u8 port)
+{
+	dpns_tmu_shaper_disable(tmu, port, DPNS_TMU_ROOT_SHAPER);
 	tmu->ports[port].tbf_handle = 0;
+}
+
+static void dpns_tmu_queue_tbf_disable(struct dpns_tmu *tmu, u8 port,
+				       u8 queue)
+{
+	dpns_tmu_shaper_disable(tmu, port, DPNS_TMU_QUEUE_SHAPER(queue));
+	tmu->ports[port].queue_tbf_handle[queue] = 0;
+}
+
+static void dpns_tmu_queue_tbfs_disable(struct dpns_tmu *tmu, u8 port)
+{
+	u8 queue;
+
+	for (queue = DPNS_TMU_FIRST_SHAPED_QUEUE;
+	     queue < QUE_MAX_NUM_PER_PORT; queue++)
+		dpns_tmu_queue_tbf_disable(tmu, port, queue);
 }
 
 static int dpns_tmu_rate_cfg(struct dpns_tmu *tmu, u64 rate, u32 *ctrl,
@@ -342,16 +367,15 @@ static int dpns_tmu_rate_cfg(struct dpns_tmu *tmu, u64 rate, u32 *ctrl,
 	return -ERANGE;
 }
 
-static int dpns_tmu_tbf_replace(struct dpns_tmu *tmu, u8 port,
-				struct tc_tbf_qopt_offload *qopt)
+static int dpns_tmu_shaper_replace(struct dpns_tmu *tmu, u8 port, u8 shaper,
+				   u8 position,
+				   struct tc_tbf_qopt_offload *qopt)
 {
 	const struct tc_tbf_qopt_offload_replace_params *params =
 		&qopt->replace_params;
 	u32 ctrl, ctrl2, max_credit, weight;
 	int ret;
 
-	if (qopt->parent != TC_H_ROOT)
-		return -EOPNOTSUPP;
 	if (params->rate.linklayer == TC_LINKLAYER_ATM ||
 	    params->rate.overhead || params->rate.mpu)
 		return -EOPNOTSUPP;
@@ -365,28 +389,103 @@ static int dpns_tmu_tbf_replace(struct dpns_tmu *tmu, u8 port,
 		return ret;
 
 	max_credit = FIELD_PREP(TMU_SHP_MAX_CREDIT_MASK, params->max_size);
-	ctrl2 = FIELD_PREP(TMU_SHP_POS, DPNS_TMU_PORT_OUTPUT) |
+	ctrl2 = FIELD_PREP(TMU_SHP_POS, position) |
 		FIELD_PREP(TMU_SHP_BIT_RATE, TMU_SHP_SCHED_PKT_LEN) |
 		FIELD_PREP(TMU_SHP_MODE, TMU_SHP_MODE_KEEP_CREDIT);
 
 	/* Disable first: CTRL is also the commit point for a new rate. */
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL,
-			  0);
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_WEIGHT,
-			  weight);
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER,
-			  TMU_SHP_MAX_CREDIT, max_credit);
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER,
-			  TMU_SHP_MIN_CREDIT, DPNS_TMU_MIN_CREDIT_DEFAULT);
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL2,
-			  ctrl2);
-	tmu_shaper_writel(tmu->priv, port, DPNS_TMU_ROOT_SHAPER, TMU_SHP_CTRL,
-			  ctrl);
-	tmu->ports[port].tbf_handle = qopt->handle;
-	tmu->ports[port].prio_handle = 0;
-	tmu->ports[port].ets_handle = 0;
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_CTRL, 0);
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_WEIGHT, weight);
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_MAX_CREDIT,
+			  max_credit);
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_MIN_CREDIT,
+			  DPNS_TMU_MIN_CREDIT_DEFAULT);
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_CTRL2, ctrl2);
+	tmu_shaper_writel(tmu->priv, port, shaper, TMU_SHP_CTRL, ctrl);
 
 	return 0;
+}
+
+static int dpns_tmu_tbf_queue(struct dpns_tmu *tmu, u8 port, u32 parent,
+			      u8 *queue)
+{
+	u32 sched_handle = tmu->ports[port].prio_handle ?:
+			   tmu->ports[port].ets_handle;
+	u32 band;
+
+	if (!sched_handle || TC_H_MAJ(parent) != TC_H_MAJ(sched_handle))
+		return -EOPNOTSUPP;
+
+	band = TC_H_MIN(parent);
+	if (!band || band > QUE_MAX_NUM_PER_PORT -
+				    DPNS_TMU_FIRST_SHAPED_QUEUE)
+		return -EOPNOTSUPP;
+
+	*queue = QUE_MAX_NUM_PER_PORT - band;
+	return 0;
+}
+
+static int dpns_tmu_tbf_replace(struct dpns_tmu *tmu, u8 port,
+				struct tc_tbf_qopt_offload *qopt)
+{
+	u8 queue, shaper, position;
+	int ret;
+
+	if (qopt->parent == TC_H_ROOT) {
+		shaper = DPNS_TMU_ROOT_SHAPER;
+		position = DPNS_TMU_PORT_OUTPUT;
+		ret = dpns_tmu_shaper_replace(tmu, port, shaper, position, qopt);
+		if (ret)
+			return ret;
+
+		dpns_tmu_queue_tbfs_disable(tmu, port);
+		tmu->ports[port].tbf_handle = qopt->handle;
+		tmu->ports[port].prio_handle = 0;
+		tmu->ports[port].ets_handle = 0;
+		return 0;
+	}
+
+	ret = dpns_tmu_tbf_queue(tmu, port, qopt->parent, &queue);
+	if (ret)
+		return ret;
+
+	shaper = DPNS_TMU_QUEUE_SHAPER(queue);
+	ret = dpns_tmu_shaper_replace(tmu, port, shaper, shaper, qopt);
+	if (!ret)
+		tmu->ports[port].queue_tbf_handle[queue] = qopt->handle;
+
+	return ret;
+}
+
+static bool dpns_tmu_tbf_active(struct dpns_tmu *tmu, u8 port, u32 handle)
+{
+	u8 queue;
+
+	if (tmu->ports[port].tbf_handle == handle)
+		return true;
+	for (queue = DPNS_TMU_FIRST_SHAPED_QUEUE;
+	     queue < QUE_MAX_NUM_PER_PORT; queue++)
+		if (tmu->ports[port].queue_tbf_handle[queue] == handle)
+			return true;
+
+	return false;
+}
+
+static void dpns_tmu_tbf_destroy(struct dpns_tmu *tmu, u8 port, u32 handle)
+{
+	u8 queue;
+
+	if (tmu->ports[port].tbf_handle == handle) {
+		dpns_tmu_tbf_disable(tmu, port);
+		return;
+	}
+
+	for (queue = DPNS_TMU_FIRST_SHAPED_QUEUE;
+	     queue < QUE_MAX_NUM_PER_PORT; queue++)
+		if (tmu->ports[port].queue_tbf_handle[queue] == handle) {
+			dpns_tmu_queue_tbf_disable(tmu, port, queue);
+			return;
+		}
 }
 
 static bool dpns_tmu_prio_map_supported(const u8 *priomap)
@@ -405,6 +504,20 @@ static bool dpns_tmu_prio_map_supported(const u8 *priomap)
 	return true;
 }
 
+static bool dpns_tmu_graft_supported(struct dpns_tmu *tmu, u8 port, u8 band,
+				     u32 child_handle)
+{
+	u8 queue;
+
+	if (!child_handle)
+		return true;
+	if (band >= QUE_MAX_NUM_PER_PORT - DPNS_TMU_FIRST_SHAPED_QUEUE)
+		return false;
+
+	queue = QUE_MAX_NUM_PER_PORT - 1 - band;
+	return tmu->ports[port].queue_tbf_handle[queue] == child_handle;
+}
+
 static int dpns_tmu_prio_replace(struct dpns_tmu *tmu, u8 port,
 				 struct tc_prio_qopt_offload *qopt)
 {
@@ -414,6 +527,7 @@ static int dpns_tmu_prio_replace(struct dpns_tmu *tmu, u8 port,
 	if (qopt->parent != TC_H_ROOT ||
 	    params->bands != QUE_MAX_NUM_PER_PORT ||
 	    !dpns_tmu_prio_map_supported(params->priomap)) {
+		dpns_tmu_queue_tbfs_disable(tmu, port);
 		tmu->ports[port].prio_handle = 0;
 		return -EOPNOTSUPP;
 	}
@@ -438,6 +552,7 @@ static int dpns_tmu_setup_prio(struct dpns_tmu *tmu, u8 port,
 		return dpns_tmu_prio_replace(tmu, port, qopt);
 	case TC_PRIO_DESTROY:
 		if (tmu->ports[port].prio_handle == qopt->handle) {
+			dpns_tmu_queue_tbfs_disable(tmu, port);
 			tmu_port_sched_cfg(tmu->priv, port);
 			tmu->ports[port].prio_handle = 0;
 		}
@@ -446,10 +561,13 @@ static int dpns_tmu_setup_prio(struct dpns_tmu *tmu, u8 port,
 		return tmu->ports[port].prio_handle == qopt->handle ? 0 :
 			-EOPNOTSUPP;
 	case TC_PRIO_GRAFT:
-		if (tmu->ports[port].prio_handle == qopt->handle &&
-		    qopt->graft_params.child_handle)
-			tmu->ports[port].prio_handle = 0;
-		return qopt->graft_params.child_handle ? -EOPNOTSUPP : 0;
+		if (dpns_tmu_graft_supported(tmu, port,
+					     qopt->graft_params.band,
+					     qopt->graft_params.child_handle))
+			return 0;
+		dpns_tmu_queue_tbfs_disable(tmu, port);
+		tmu->ports[port].prio_handle = 0;
+		return -EOPNOTSUPP;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -480,6 +598,7 @@ static int dpns_tmu_ets_replace(struct dpns_tmu *tmu, u8 port,
 	return 0;
 
 unsupported:
+	dpns_tmu_queue_tbfs_disable(tmu, port);
 	tmu->ports[port].ets_handle = 0;
 	return -EOPNOTSUPP;
 }
@@ -492,6 +611,7 @@ static int dpns_tmu_setup_ets(struct dpns_tmu *tmu, u8 port,
 		return dpns_tmu_ets_replace(tmu, port, qopt);
 	case TC_ETS_DESTROY:
 		if (tmu->ports[port].ets_handle == qopt->handle) {
+			dpns_tmu_queue_tbfs_disable(tmu, port);
 			tmu_port_sched_cfg(tmu->priv, port);
 			tmu->ports[port].ets_handle = 0;
 		}
@@ -500,10 +620,13 @@ static int dpns_tmu_setup_ets(struct dpns_tmu *tmu, u8 port,
 		return tmu->ports[port].ets_handle == qopt->handle ? 0 :
 			-EOPNOTSUPP;
 	case TC_ETS_GRAFT:
-		if (tmu->ports[port].ets_handle == qopt->handle &&
-		    qopt->graft_params.child_handle)
-			tmu->ports[port].ets_handle = 0;
-		return qopt->graft_params.child_handle ? -EOPNOTSUPP : 0;
+		if (dpns_tmu_graft_supported(tmu, port,
+					     qopt->graft_params.band,
+					     qopt->graft_params.child_handle))
+			return 0;
+		dpns_tmu_queue_tbfs_disable(tmu, port);
+		tmu->ports[port].ets_handle = 0;
+		return -EOPNOTSUPP;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -528,9 +651,12 @@ int dpns_tmu_setup_tc(struct dpns_priv *priv, u8 port, enum tc_setup_type type,
 			ret = dpns_tmu_tbf_replace(tmu, port, qopt);
 			break;
 		case TC_TBF_DESTROY:
-			if (tmu->ports[port].tbf_handle == qopt->handle)
-				dpns_tmu_tbf_disable(tmu, port);
+			dpns_tmu_tbf_destroy(tmu, port, qopt->handle);
 			ret = 0;
+			break;
+		case TC_TBF_STATS:
+			ret = dpns_tmu_tbf_active(tmu, port, qopt->handle) ? 0 :
+				-EOPNOTSUPP;
 			break;
 		default:
 			ret = -EOPNOTSUPP;

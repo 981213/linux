@@ -274,7 +274,8 @@ static int prio_show(unsigned int ifindex)
 					offloaded = *(uint8_t *)RTA_DATA(rta);
 			}
 			if (kind && (!strcmp(kind, "prio") ||
-				     !strcmp(kind, "ets"))) {
+				     !strcmp(kind, "ets") ||
+				     !strcmp(kind, "tbf"))) {
 				printf("%s handle %x: hw_offload %d\n", kind,
 				       tcm->tcm_handle, offloaded);
 				found = 1;

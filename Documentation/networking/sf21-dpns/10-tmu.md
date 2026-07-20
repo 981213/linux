@@ -279,7 +279,7 @@ MODIFY 会把其计算的 header length 返回 TMU，以修正 shaper 的 packet
 
 ## Linux root TBF 配置
 
-当前主线化实现只暴露物理端口 root TBF，使用原生根 shaper 0、position 0：
+物理端口 root TBF 使用原生根 shaper 0、position 0：
 
 1. 先 disable shaper 0，避免半更新参数立即生效。
 2. 写 weight、max credit、min credit 和 position 0。
@@ -291,7 +291,7 @@ tc qdisc replace dev eth0 root tbf rate 100mbit burst 2k latency 50ms
 tc qdisc del dev eth0 root
 ```
 
-当前实现接受的 `max_size` 上限为 4095 Byte；更大的 burst 会使硬件 offload 被拒绝并由 qdisc 回退到软件路径。当前不支持 ATM linklayer、额外 overhead/mpu，也没有暴露 queue、WFQ/DWRR/WRR/WRED。
+当前实现接受的 `max_size` 上限为 4095 Byte；更大的 burst 会使硬件 offload 被拒绝并由 qdisc 回退到软件路径。当前不支持 ATM linklayer、额外 overhead/mpu，也没有暴露 queue threshold、WFQ/DWRR/WRR/WRED。
 
 ## Linux strict-priority 配置
 
@@ -313,6 +313,15 @@ tc qdisc replace dev eth0 root handle 1: ets bands 8 strict 8 \
 ```
 
 Weighted ETS 需要可信的 quantum-to-weight 换算。当前寄存器资料没有定义 WFQ/DWRR/WRR weight 单位，各 weighted 模式也尚未表现出可重复的比例关系，因此任何带非零 quantum 的 ETS 配置都不会 offload。
+
+PRIO 或 strict-only ETS 的最高四个 band 可以下挂 TBF：band 0～3 分别对应 Q7～Q4，并使用保持在原生 position 5～2 的 shaper 5～2。例如只限制 PCP 7/Q7：
+
+```sh
+tc qdisc replace dev eth0 parent 1:1 handle 2: \
+  tbf rate 100mbit burst 2k latency 50ms
+```
+
+Q0～Q3 没有各自独立的 shaper；shaper 1 位于 scheduler 0 输出，只能同时限制这四个 queue。因此 band 4～7 下挂的 per-queue TBF 无法准确表达，驱动会拒绝 offload。保持 shaper 2～5 的原生 position 也使默认 MD2TM bitmap 对 Q4～Q7 的 header-length 修正继续有效。
 
 ## 推荐调试顺序
 

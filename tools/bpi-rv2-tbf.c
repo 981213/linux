@@ -87,7 +87,8 @@ static int transact(struct nlmsghdr *nlh)
 		ret = -errno;
 		goto out;
 	}
-	for (answer = (struct nlmsghdr *)response; NLMSG_OK(answer, len);
+	for (answer = (struct nlmsghdr *)response;
+	     NLMSG_OK(answer, (unsigned int)len);
 	     answer = NLMSG_NEXT(answer, len)) {
 		if (answer->nlmsg_type == NLMSG_ERROR) {
 			ret = ((struct nlmsgerr *)NLMSG_DATA(answer))->error;
@@ -100,7 +101,7 @@ out:
 }
 
 static int tbf_replace(unsigned int ifindex, uint64_t rate_bps,
-		       uint32_t burst)
+		       uint32_t burst, uint32_t parent)
 {
 	struct request req = {
 		.nlh = {
@@ -111,8 +112,9 @@ static int tbf_replace(unsigned int ifindex, uint64_t rate_bps,
 		},
 		.tcm = {
 			.tcm_family = AF_UNSPEC,
-			.tcm_handle = QDISC_HANDLE,
-			.tcm_parent = TC_H_ROOT,
+			.tcm_handle = parent == TC_H_ROOT ? QDISC_HANDLE :
+				      TC_H_MAKE((TC_H_MIN(parent) + 1) << 16, 0),
+			.tcm_parent = parent,
 		},
 	};
 	struct tc_tbf_qopt qopt = {};
@@ -154,7 +156,7 @@ static int tbf_replace(unsigned int ifindex, uint64_t rate_bps,
 	return transact(&req.nlh);
 }
 
-static int tbf_destroy(unsigned int ifindex)
+static int tbf_destroy(unsigned int ifindex, uint32_t parent)
 {
 	struct request req = {
 		.nlh = {
@@ -164,7 +166,7 @@ static int tbf_destroy(unsigned int ifindex)
 		},
 		.tcm = {
 			.tcm_family = AF_UNSPEC,
-			.tcm_parent = TC_H_ROOT,
+			.tcm_parent = parent,
 		},
 	};
 
@@ -176,13 +178,14 @@ int main(int argc, char **argv)
 {
 	unsigned int ifindex;
 	uint64_t rate;
+	uint32_t parent = TC_H_ROOT;
 	uint32_t burst;
 	char *end;
 	int ret;
 
-	if (argc != 3 && argc != 4) {
+	if (argc < 3 || argc > 5) {
 		fprintf(stderr,
-			"usage: %s IFACE clear | IFACE RATE_BPS BURST_BYTES\n",
+			"usage: %s IFACE clear [PARENT] | IFACE RATE_BPS BURST_BYTES [PARENT]\n",
 			argv[0]);
 		return 2;
 	}
@@ -191,9 +194,19 @@ int main(int argc, char **argv)
 		perror(argv[1]);
 		return 2;
 	}
-	if (argc == 3 && !strcmp(argv[2], "clear")) {
-		ret = tbf_destroy(ifindex);
-	} else if (argc == 4) {
+	if (!strcmp(argv[2], "clear")) {
+		if (argc == 4) {
+			errno = 0;
+			parent = strtoul(argv[3], &end, 0);
+			if (errno || *end) {
+				fprintf(stderr, "invalid parent: %s\n", argv[3]);
+				return 2;
+			}
+		} else if (argc != 3) {
+			return 2;
+		}
+		ret = tbf_destroy(ifindex, parent);
+	} else if (argc == 4 || argc == 5) {
 		errno = 0;
 		rate = strtoull(argv[2], &end, 0);
 		if (errno || *end) {
@@ -205,7 +218,15 @@ int main(int argc, char **argv)
 			fprintf(stderr, "invalid burst: %s\n", argv[3]);
 			return 2;
 		}
-		ret = tbf_replace(ifindex, rate, burst);
+		if (argc == 5) {
+			errno = 0;
+			parent = strtoul(argv[4], &end, 0);
+			if (errno || *end) {
+				fprintf(stderr, "invalid parent: %s\n", argv[4]);
+				return 2;
+			}
+		}
+		ret = tbf_replace(ifindex, rate, burst, parent);
 	} else {
 		fprintf(stderr, "invalid arguments\n");
 		return 2;
